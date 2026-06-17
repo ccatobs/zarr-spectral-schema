@@ -28,7 +28,7 @@ of the ops-db chain, but a separate domain (not co-located with it). It owns the
 **data-interchange contract** (on-disk store shape), never the recipe/DAG config
 (calibrate runs no recipes; see ADR-0001/0006).
 
-**One hand-authored, language-neutral spec file is the maser.** The Rust consts
+**One hand-authored, language-neutral spec file is the single source of truth.** The Rust consts
 and the Python tables are both **generated** from it — there is no second
 hand-maintained copy to drift. The entire on-disk contract is **declarative**,
 including the multi-frontend `band_N` "this attr is allowed at scan *or* band

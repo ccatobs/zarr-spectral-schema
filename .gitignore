@@ -15,6 +15,10 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
+# Emitted conformance fixtures (regenerated from the spec; never committed).
+# The SYNCED spec copies under bindings/*/spec/ ARE committed (CI verifies them).
+conformance/fixtures/
+
 # Editors / OS
 .DS_Store
 *.swp

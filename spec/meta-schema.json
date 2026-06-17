@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ccatobs.org/zarr-spectral-schema/meta-schema.json",
+  "title": "zarr-spectral-schema spec DSL meta-schema",
+  "description": "Validates spec/schema.yaml itself. The DSL is fully declarative so the validator can stay a generic interpreter; this meta-schema is the guard that keeps the spec well-formed. Self-validating: schema.yaml conforms to this, and this is itself a valid JSON Schema (draft 2020-12).",
+  "type": "object",
+  "required": ["spec_version", "versions", "levels"],
+  "additionalProperties": false,
+  "properties": {
+    "spec_version": {
+      "description": "This repo's package version (off-disk; provenance only).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "versions": {
+      "description": "Producer-owned, on-disk version attributes, keyed by the on-disk attribute name.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/version" }
+    },
+    "levels": {
+      "description": "Structural contract per data level (L0, L1, ...).",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "enum": ["L0", "L1"] },
+      "additionalProperties": { "$ref": "#/$defs/level" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "object",
+      "required": ["level", "on_disk", "value", "min_supported"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "enum": ["L0", "L1"] },
+        "on_disk": {
+          "description": "How the value is encoded in the store attribute.",
+          "enum": ["integer", "string"]
+        },
+        "value": { "type": "string" },
+        "min_supported": { "type": "string" }
+      }
+    },
+    "level": {
+      "type": "object",
+      "required": ["groups"],
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/group" }
+        }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["arrays"],
+      "additionalProperties": false,
+      "properties": {
+        "arrays": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/array" }
+        }
+      }
+    },
+    "array": {
+      "type": "object",
+      "required": ["dtype", "ndim", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "dtype": {
+          "description": "Zarr v3 core data type name.",
+          "enum": ["float32", "float64", "int32", "int64", "uint8", "bool"]
+        },
+        "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "required": { "type": "boolean" }
+      }
+    }
+  }
+}

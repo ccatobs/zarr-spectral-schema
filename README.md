@@ -21,7 +21,7 @@ The design is settled; the code is not yet built. **Start here:**
 
 ## Design in one breath
 
-- **Spec-file-as-maser** — one hand-authored, language-neutral spec (`spec/schema.yaml`); the Rust crate (`build.rs` codegen) and the Python package (loads the spec as package data) are both *derived* from it. No second hand-maintained copy.
+- **Spec file is the single source of truth** — one hand-authored, language-neutral spec (`spec/schema.yaml`); the Rust crate (`build.rs` codegen) and the Python package (loads the spec as package data) are both *derived* from it. No second hand-maintained copy.
 - **Fully-declarative contract** → a generic-interpreter validator, identical in both languages. The lone hand-written per-language seam is string encoding, pinned by conformance tests.
 - **v1 scope = L0 + L1 only** — the cross-tool handoffs. L2/L3/provenance stay YODA-owned until the DAG engine writes them. SDFITS (L1/L2) and FITS-map (L3) export kept non-foreclosed.
 - **Two-axis versioning** — producer-owned on-disk versions; this repo's package version stays off-disk; consumer checks `>= min` → warn-once on newer minor, error on newer major.
@@ -33,7 +33,7 @@ Full rationale: ADR-0007 and the epic.
 ## Layout (target — created by the scaffolding slices)
 
 ```
-spec/             # the maser — schema.yaml + meta-schema (self-validating DSL)
+spec/             # source of truth — schema.yaml + meta-schema (self-validating DSL)
 bindings/rust/    # build.rs codegen → consts (cal-schema migrates here)
 bindings/python/  # package; ships + loads the spec as package data
 conformance/      # golden fixtures (synthetic + frozen-legacy) + parity tests

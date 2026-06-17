@@ -1,0 +1,92 @@
+# spec/schema.yaml — THE SPEC (single source of truth).
+#
+# The single hand-authored, language-neutral source of truth for the on-disk
+# Zarr "storage language" of the CCAT/CHAI heterodyne pipeline (zarr-fits writes
+# L0, calibrate writes L1, YODA reads). This is the ONLY authored copy: the
+# per-binding copies under bindings/*/.../spec/schema.yaml are mechanically
+# synced from this file (`make sync`, verified in CI) — never hand-edited.
+#
+# Slice 1 (tracer bullet) scope: exactly one array field (`data_5d`) and one
+# version (`l0_schema_version`), carried end-to-end through codegen + both
+# validators. The structure below is deliberately shaped for the full L0+L1
+# contract so later slices ADD entries without restructuring; the commented
+# stubs mark where each future slice slots in. Field values that are declared
+# here already mirror what zarr-fits-core / cal-io actually write.
+
+# This repo's package version. OFF-DISK (provenance only) — it never appears in
+# a store. Distinct from the producer-owned on-disk versions in `versions`.
+spec_version: "0.1.0"
+
+# Producer-owned, ON-DISK version attributes. A consumer checks `>= min_supported`
+# (warn newer-minor, error newer-major) — that negotiation lands in Slice 3 (#4);
+# Slice 1 only proves presence + on-disk encoding.
+versions:
+  l0_schema_version:
+    level: L0
+    on_disk: integer            # zarr-fits writes this root attr as a JSON integer
+    value: "2"
+    min_supported: "1"
+  # cal_schema_version:         # Slice 5 (#5): L1 string version "1.3" (calibrate-written)
+  #   level: L1
+  #   on_disk: string
+  #   value: "1.3"
+  #   min_supported: "1.0"
+
+# The structural contract, per data level. Each level holds named groups; each
+# group holds named arrays. An array's on-disk name IS its key here.
+levels:
+  L0:
+    groups:
+      source:
+        arrays:
+          # data_5d is the raw spectrometer cube zarr-fits-core writes (writer.rs).
+          # int32 = raw counts (fill = i32::MIN); calibrate's L1 counterpart
+          # `spectra` holds the calibrated float temperatures. Axis order, written
+          # verbatim by the producer as the group `axis_order` attr, is:
+          #   channels, dumps, receivers, arrays, subscans   (C, D, R, A, S)
+          # Per-axis `shape_dims` + the fill-value rule activate in Slice 5 (#5).
+          data_5d:
+            dtype: int32
+            ndim: 5
+            required: true
+      # calibration:            # Slice 5 (#5): also carries data_5d + HOT/COLD/SKY coords
+      #   arrays: { ... }
+  # L1:                         # Slice 5 (#5): spectra (float), t_sys, t_int, flags, freqs ...
+  #   groups: { ... }
+
+# ── RESERVED (ADR-0008) — shown for the HITL review; activated in later slices ──
+#
+# completeness:                 # Slice 5/6 — the streaming/append primitive
+#   marker: l1_complete         # written last; absence ⇒ unit not trustworthy
+#
+# placement:                    # Slice 5 (#5) — ARBITRARY archive nesting, not just scan-or-band.
+#   hierarchy: [flight, scan, band]      # ordered nesting levels (object-store key templates, no POSIX)
+#   levels:                              # real L0 today is scan_{N}/{source|calibration}/data_5d
+#     flight: { path: "flight_{flight_id}", optional: true }   # archival grouping (per-flight ingest)
+#     scan:   { path: "scan_{scan_id}" }
+#     band:   { path: "band_{band}", scan_or_band: true }      # the multi-frontend rule, as a placement property
+#
+# attrs:                        # Slices 6 (#6) identity + 7 (#7) science self-description.
+#   #
+#   # `index: true` ⇒ part of the DISCOVERY SURFACE → a catalog column (ADR-0008). The
+#   # hint is non-binding: it changes nothing on disk, it tells a catalog-builder which
+#   # attrs to lift from the (cheap) attribute surface.
+#   #
+#   # DECISION (open item 2, signed off 2026-06-16): `index` marks ATTRIBUTES ONLY.
+#   # The catalog-builder reads attrs, never bulk arrays. A quantity stored as an
+#   # ARRAY (e.g. signal_freq is a per-subscan f64 array in zarr-fits) is cataloged via
+#   # a PRODUCER-written summary attr — extract once, forward always, re-derive never
+#   # (ADR-0007 governing principle). So frequency coverage is indexed through required
+#   # signal_freq_min / signal_freq_max attrs, NOT by indexing the array.
+#   #
+#   # Real attrs zarr-fits already writes that become the discovery surface:
+#   frontend:        { level: L0, required: true, index: true }   # forwarded; LCP extracted once at L0
+#   source:          { level: L0, required: true, index: true }   # scan-group attr
+#   line:            { level: L0, required: true, index: true }
+#   obs_id:          { level: L0, required: true, index: true }   # identity passthrough (issue #46)
+#   observatory:     { level: L0, required: true, index: true }   # root attr
+#   signal_freq_min: { level: L0, required: true, index: true }   # summary of the signal_freq ARRAY
+#   signal_freq_max: { level: L0, required: true, index: true }
+#   # ... velocity_frame, temperature_scale, etc. (Slice 7)
+#
+# precedence_aliases:           # Slice 5/6: { pixel_offset: { from: [PIXOFFX, RXDX] } }

@@ -1,0 +1,19 @@
+[package]
+name = "zarr-spectral-schema"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Source of truth for the CCAT/CHAI L0–L1 Zarr store contract (Rust binding)"
+
+[lib]
+name = "zarr_spectral_schema"
+path = "src/lib.rs"
+
+[dependencies]
+# Versions match the calibrate workspace so the Slice 3 (#3) lift is frictionless.
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1"
+
+[build-dependencies]
+serde_yaml = "0.9"
