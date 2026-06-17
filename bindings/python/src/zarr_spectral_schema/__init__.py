@@ -17,19 +17,42 @@ from ._validator import validate, validate_view
 __all__ = ["validate", "validate_view", "load_spec", "constants"]
 
 
-def _build_constants() -> dict[str, str]:
+def _build_constants() -> dict[str, str | tuple[str, ...]]:
+    """Spec-derived constants, mirroring the Rust binding's generated consts.
+
+    Same identifier rules as build.rs: array → UPPER(on-disk name); group →
+    UPPER(name)_GROUP (or none if ``const: false``); version → UPPER(attr key);
+    any node may override via ``const``. ``lists`` → tuples; ``markers`` → str.
+    """
     spec = load_spec()
-    consts: dict[str, str] = {}
-    for version_name, vspec in spec.get("versions", {}).items():
-        consts[version_name.upper()] = vspec["value"]
+    consts: dict[str, str | tuple[str, ...]] = {}
+
+    def put(name: str, value: str | tuple[str, ...]) -> None:
+        if name in consts and consts[name] != value:
+            raise ValueError(f"const {name} declared with conflicting values")
+        consts[name] = value
+
+    for attr_name, vspec in spec.get("versions", {}).items():
+        put(vspec.get("const") or attr_name.upper(), vspec["value"])
+
     for level in spec.get("levels", {}).values():
-        for group in level.get("groups", {}).values():
-            for array_name in group.get("arrays", {}):
-                consts[array_name.upper()] = array_name
+        for group_name, group in level.get("groups", {}).items():
+            gconst = group.get("const")
+            if gconst is not False:
+                put(gconst or f"{group_name.upper()}_GROUP", group_name)
+            for array_name, aspec in group.get("arrays", {}).items():
+                put(aspec.get("const") or array_name.upper(), array_name)
+
+    for name, value in spec.get("markers", {}).items():
+        put(name, value)
+
+    for name, items in spec.get("lists", {}).items():
+        put(name, tuple(items))
+
     return consts
 
 
 # Spec-derived constants exposed both as a dict and as module attributes.
-constants: dict[str, str] = _build_constants()
+constants: dict[str, str | tuple[str, ...]] = _build_constants()
 globals().update(constants)
 __all__ += list(constants)

@@ -6,87 +6,149 @@
 # per-binding copies under bindings/*/.../spec/schema.yaml are mechanically
 # synced from this file (`make sync`, verified in CI) — never hand-edited.
 #
-# Slice 1 (tracer bullet) scope: exactly one array field (`data_5d`) and one
-# version (`l0_schema_version`), carried end-to-end through codegen + both
-# validators. The structure below is deliberately shaped for the full L0+L1
-# contract so later slices ADD entries without restructuring; the commented
-# stubs mark where each future slice slots in. Field values that are declared
-# here already mirror what zarr-fits-core / cal-io actually write.
+# Scope (#3): reproduce EVERY current cal-schema constant from this spec, with
+# real dtype/ndim filled in (decision (b)). dtype/ndim values mirror what
+# zarr-fits-core (L0) and cal-io (L1) actually write; the genuine scan-or-band
+# `placement` rule and real-store validation are deferred to #5. On-disk attrs
+# that are NOT cal-schema constants (store_version, cal_engine_version, the
+# hard-coded L1 arrays t_off/s_h_obs/…) also land in #5.
+#
+# Codegen rule (build.rs): each array/group/version yields a Rust `pub const`.
+# Default identifier: array → UPPER(on-disk name); group → UPPER(name)_GROUP;
+# version → UPPER(attr key). Override with `const:`; suppress a group const with
+# `const: false`. `lists:`/`markers:` yield `&[&str]`/`&str` consts directly.
 
-# This repo's package version. OFF-DISK (provenance only) — it never appears in
-# a store. Distinct from the producer-owned on-disk versions in `versions`.
+# This repo's package version. OFF-DISK (provenance only) — never on disk.
 spec_version: "0.1.0"
 
-# Producer-owned, ON-DISK version attributes. A consumer checks `>= min_supported`
-# (warn newer-minor, error newer-major) — that negotiation lands in Slice 3 (#4);
-# Slice 1 only proves presence + on-disk encoding.
+# Producer-owned, ON-DISK version attributes. Consumer checks `>= min_supported`
+# (warn newer-minor, error newer-major) — negotiation lands in #4.
 versions:
-  l0_schema_version:
+  l0_schema_version:            # → const L0_SCHEMA_VERSION
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
     value: "2"
     min_supported: "1"
-  # cal_schema_version:         # Slice 5 (#5): L1 string version "1.3" (calibrate-written)
-  #   level: L1
-  #   on_disk: string
-  #   value: "1.3"
-  #   min_supported: "1.0"
+  cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
+    level: L1
+    on_disk: string             # cal-io writes this root attr as a JSON string
+    value: "1.3"
+    min_supported: "1.0"
+    const: L1_SCHEMA_VERSION
 
 # The structural contract, per data level. Each level holds named groups; each
-# group holds named arrays. An array's on-disk name IS its key here.
+# group holds named arrays (on-disk name = the key). dtype/ndim mirror the writers.
 levels:
   L0:
     groups:
-      source:
+      source:                   # → const SOURCE_GROUP
         arrays:
-          # data_5d is the raw spectrometer cube zarr-fits-core writes (writer.rs).
-          # int32 = raw counts (fill = i32::MIN); calibrate's L1 counterpart
-          # `spectra` holds the calibrated float temperatures. Axis order, written
-          # verbatim by the producer as the group `axis_order` attr, is:
-          #   channels, dumps, receivers, arrays, subscans   (C, D, R, A, S)
-          # Per-axis `shape_dims` + the fill-value rule activate in Slice 5 (#5).
-          data_5d:
-            dtype: int32
-            ndim: 5
-            required: true
-      # calibration:            # Slice 5 (#5): also carries data_5d + HOT/COLD/SKY coords
-      #   arrays: { ... }
-  # L1:                         # Slice 5 (#5): spectra (float), t_sys, t_int, flags, freqs ...
-  #   groups: { ... }
+          # data_5d: raw spectrometer counts; axis order C,D,R,A,S (group attr).
+          data_5d:          { dtype: int32,   ndim: 5, required: true }
+          # Coordinate arrays (1D [S]); dtype split per the L0 writer's match.
+          mjd:              { dtype: float64, ndim: 1, required: true }
+          exptime:          { dtype: float32, ndim: 1, required: true }
+          elevation:        { dtype: float32, ndim: 1, required: true }
+          azimuth:          { dtype: float32, ndim: 1, required: true }
+          pamb:             { dtype: float32, ndim: 1, required: true }
+          tamb:             { dtype: float32, ndim: 1, required: true }
+          tsky:             { dtype: float32, ndim: 1, required: true, const: TSKY_L0 }  # L0 sky temp; ≠ L1 t_sky
+          signal_freq:      { dtype: float64, ndim: 1, required: true }
+          image_freq:       { dtype: float64, ndim: 1, required: true }
+          freq_res:         { dtype: float64, ndim: 1, required: true }
+          freq_off:         { dtype: float64, ndim: 1, required: true }
+          ref_channel:      { dtype: float32, ndim: 1, required: true }
+          lloadsn:          { dtype: int32,   ndim: 1, required: true }
+          # String arrays (the str_array per-language seam): zarr v3 `string`, 1D [S].
+          sobsmode:         { dtype: string,  ndim: 1, required: true }
+          frontend_backends: { dtype: string, ndim: 1, required: true }
+          raw_fits_headers: { dtype: string,  ndim: 1, required: true }
+          instmode_subscan: { dtype: string,  ndim: 1, required: true }
+          nod_beam:         { dtype: string,  ndim: 1, required: true }
+          chop_freq:        { dtype: float32, ndim: 1, required: true, const: CHOP_FREQ_COORD }
+          # Source-only geometry: OTF scan track [D,S] and per-pixel offsets [R,A,S].
+          otf_lon:          { dtype: float64, ndim: 2, required: false }
+          otf_lat:          { dtype: float64, ndim: 2, required: false }
+          pixel_offset_lon: { dtype: float64, ndim: 3, required: false }
+          pixel_offset_lat: { dtype: float64, ndim: 3, required: false }
+      calibration:              # → const CALIBRATION_GROUP
+        arrays:
+          data_5d:          { dtype: int32,   ndim: 5, required: true }
+          mjd:              { dtype: float64, ndim: 1, required: true }
+          exptime:          { dtype: float32, ndim: 1, required: true }
+          elevation:        { dtype: float32, ndim: 1, required: true }
+          azimuth:          { dtype: float32, ndim: 1, required: true }
+          pamb:             { dtype: float32, ndim: 1, required: true }
+          tamb:             { dtype: float32, ndim: 1, required: true }
+          tsky:             { dtype: float32, ndim: 1, required: true, const: TSKY_L0 }
+          thot:             { dtype: float32, ndim: 1, required: true }   # calibration only
+          tcold:            { dtype: float32, ndim: 1, required: true }   # calibration only
+          lloadsn:          { dtype: int32,   ndim: 1, required: true }
+          signal_freq:      { dtype: float64, ndim: 1, required: true }
+          image_freq:       { dtype: float64, ndim: 1, required: true }
+          freq_res:         { dtype: float64, ndim: 1, required: true }
+          freq_off:         { dtype: float64, ndim: 1, required: true }
+          ref_channel:      { dtype: float32, ndim: 1, required: true }
+          sobsmode:         { dtype: string,  ndim: 1, required: true }
+          frontend_backends: { dtype: string, ndim: 1, required: true }
+          raw_fits_headers: { dtype: string,  ndim: 1, required: true }
+          instmode_subscan: { dtype: string,  ndim: 1, required: true }
+          nod_beam:         { dtype: string,  ndim: 1, required: true }
+          chop_freq:        { dtype: float32, ndim: 1, required: true, const: CHOP_FREQ_COORD }
+  L1:
+    groups:
+      # The L1 main arrays sit directly under the scan (or band) group on disk.
+      # Modelled here as a placeholder group with NO const; real scan-or-band
+      # placement is #5. const: false suppresses a (non-existent) SCAN_GROUP const.
+      scan:
+        const: false
+        arrays:
+          spectra:      { dtype: float64, ndim: 5, required: true }   # calibrated T; C,D,R,A,S
+          t_sys:        { dtype: float64, ndim: 4, required: true }   # C,R,A,S
+          t_int:        { dtype: float64, ndim: 1, required: true }   # [S]
+          t_rec_ssb:    { dtype: float64, ndim: 3, required: true }   # C,R,A
+          gamma:        { dtype: float64, ndim: 3, required: true }
+          tau_signal:   { dtype: float64, ndim: 1, required: true }   # [C] zenith
+          tau_image:    { dtype: float64, ndim: 1, required: true }
+          t_sky:        { dtype: float64, ndim: 3, required: true }   # C,R,A; ≠ L0 tsky
+          flags:        { dtype: uint16,  ndim: 5, required: true }
+          signal_freqs: { dtype: float64, ndim: 1, required: true }
+          image_freqs:  { dtype: float64, ndim: 1, required: true }
+          otf_airmass:  { dtype: float64, ndim: 2, required: false }
+      skydiff:                  # → const SKYDIFF_GROUP
+        arrays:
+          # On disk: spectrum_<h>. The const is the "spectrum" prefix.
+          spectrum:     { dtype: float64, ndim: 3, required: false, const: SKYDIFF_SPECTRUM }
+      skychopdiff:             # → const SKYCHOPDIFF_GROUP
+        arrays:
+          # On disk: spectrum_<on>_<j>. The const is the "spectrum" prefix.
+          spectrum:     { dtype: float64, ndim: 3, required: false, const: SKYCHOPDIFF_SPECTRUM }
 
-# ── RESERVED (ADR-0008) — shown for the HITL review; activated in later slices ──
+# Ordered name lists → `pub const … : &[&str]` (membership/routing; exact order).
+lists:
+  SOURCE_COORDS: [mjd, exptime, elevation, azimuth, pamb, tamb, tsky,
+                  signal_freq, image_freq, freq_res, freq_off, ref_channel, lloadsn]
+  CAL_COORDS:    [mjd, exptime, elevation, azimuth, pamb, tamb, tsky, thot, tcold,
+                  lloadsn, signal_freq, image_freq, freq_res, freq_off, ref_channel]
+  SOURCE_MODES:  ["ON", "OFF", "OTF-ON", "OTF-OFF"]
+  CAL_MODES:     ["HOT", "COL", "COLD", "SKY", "ZERO"]
+
+# Single attribute-name constants → `pub const … : &str`.
+markers:
+  L1_COMPLETE_ATTR: l1_complete   # written last on an L1 scan/band group; absence ⇒ untrusted
+
+# ── RESERVED (ADR-0008) — activated in later slices ──
 #
-# completeness:                 # Slice 5/6 — the streaming/append primitive
-#   marker: l1_complete         # written last; absence ⇒ unit not trustworthy
+# placement:                    # #5 — ARBITRARY archive nesting + the scan-or-band rule
+#   hierarchy: [flight, scan, band]      # real L0 today: scan_{N}/{source|calibration}/data_5d
 #
-# placement:                    # Slice 5 (#5) — ARBITRARY archive nesting, not just scan-or-band.
-#   hierarchy: [flight, scan, band]      # ordered nesting levels (object-store key templates, no POSIX)
-#   levels:                              # real L0 today is scan_{N}/{source|calibration}/data_5d
-#     flight: { path: "flight_{flight_id}", optional: true }   # archival grouping (per-flight ingest)
-#     scan:   { path: "scan_{scan_id}" }
-#     band:   { path: "band_{band}", scan_or_band: true }      # the multi-frontend rule, as a placement property
-#
-# attrs:                        # Slices 6 (#6) identity + 7 (#7) science self-description.
-#   #
-#   # `index: true` ⇒ part of the DISCOVERY SURFACE → a catalog column (ADR-0008). The
-#   # hint is non-binding: it changes nothing on disk, it tells a catalog-builder which
-#   # attrs to lift from the (cheap) attribute surface.
-#   #
-#   # DECISION (open item 2, signed off 2026-06-16): `index` marks ATTRIBUTES ONLY.
-#   # The catalog-builder reads attrs, never bulk arrays. A quantity stored as an
-#   # ARRAY (e.g. signal_freq is a per-subscan f64 array in zarr-fits) is cataloged via
-#   # a PRODUCER-written summary attr — extract once, forward always, re-derive never
-#   # (ADR-0007 governing principle). So frequency coverage is indexed through required
-#   # signal_freq_min / signal_freq_max attrs, NOT by indexing the array.
-#   #
-#   # Real attrs zarr-fits already writes that become the discovery surface:
-#   frontend:        { level: L0, required: true, index: true }   # forwarded; LCP extracted once at L0
-#   source:          { level: L0, required: true, index: true }   # scan-group attr
-#   line:            { level: L0, required: true, index: true }
-#   obs_id:          { level: L0, required: true, index: true }   # identity passthrough (issue #46)
-#   observatory:     { level: L0, required: true, index: true }   # root attr
+# attrs:                        # #6 identity + #7 science self-description.
+#   # DECISION (signed off 2026-06-16): `index` marks ATTRIBUTES ONLY (the discovery
+#   # surface a catalog filters on). Array-valued quantities (e.g. signal_freq) are
+#   # cataloged via PRODUCER-written summary attrs (signal_freq_min/max) — extract once,
+#   # forward always, re-derive never (ADR-0007). Real attrs that become the surface:
+#   frontend:        { level: L0, required: true, index: true }
+#   source:          { level: L0, required: true, index: true }
 #   signal_freq_min: { level: L0, required: true, index: true }   # summary of the signal_freq ARRAY
-#   signal_freq_max: { level: L0, required: true, index: true }
-#   # ... velocity_frame, temperature_scale, etc. (Slice 7)
 #
-# precedence_aliases:           # Slice 5/6: { pixel_offset: { from: [PIXOFFX, RXDX] } }
+# precedence_aliases:           # #5/#6: { pixel_offset: { from: [PIXOFFX, RXDX] } }

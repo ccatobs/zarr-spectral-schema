@@ -18,21 +18,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
 import yaml
 import zarr
 
 SPEC = Path(__file__).resolve().parent.parent / "spec" / "schema.yaml"
 
-# Map declarative dtype names → numpy dtypes for emission.
-_DTYPE = {
-    "float32": "float32",
-    "float64": "float64",
-    "int32": "int32",
-    "int64": "int64",
-    "uint8": "uint8",
-    "bool": "bool",
-}
+# Declarative dtype names map straight onto zarr v3 data types; `string` and the
+# integer/float names are all accepted by create_array(dtype=...) and round-trip
+# to the same on-disk `data_type` the writers emit (probed against zarr 3.2).
 
 
 def load_spec() -> dict:
@@ -61,11 +54,7 @@ def emit(out_dir: Path, omit: set[str] | None = None) -> Path:
                 if rel in omit:
                     continue
                 shape = tuple([1] * aspec["ndim"])
-                g.create_array(
-                    name=array_name,
-                    shape=shape,
-                    dtype=np.dtype(_DTYPE[aspec["dtype"]]),
-                )
+                g.create_array(name=array_name, shape=shape, dtype=aspec["dtype"])
     return out_dir
 
 

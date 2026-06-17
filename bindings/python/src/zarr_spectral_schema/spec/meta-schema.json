@@ -24,9 +24,30 @@
       "minProperties": 1,
       "propertyNames": { "enum": ["L0", "L1"] },
       "additionalProperties": { "$ref": "#/$defs/level" }
+    },
+    "lists": {
+      "description": "Ordered name lists → `pub const NAME: &[&str]`. Key = the Rust const identifier.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ident" },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string" }
+      }
+    },
+    "markers": {
+      "description": "Single attribute-name constants → `pub const NAME: &str`. Key = the Rust const identifier.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ident" },
+      "additionalProperties": { "type": "string" }
     }
   },
   "$defs": {
+    "ident": {
+      "description": "A SCREAMING_SNAKE_CASE Rust constant identifier.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
     "version": {
       "type": "object",
       "required": ["level", "on_disk", "value", "min_supported"],
@@ -38,7 +59,11 @@
           "enum": ["integer", "string"]
         },
         "value": { "type": "string" },
-        "min_supported": { "type": "string" }
+        "min_supported": { "type": "string" },
+        "const": {
+          "description": "Override the generated Rust const identifier (default UPPER(attr key)).",
+          "$ref": "#/$defs/ident"
+        }
       }
     },
     "level": {
@@ -58,6 +83,13 @@
       "required": ["arrays"],
       "additionalProperties": false,
       "properties": {
+        "const": {
+          "description": "Override the generated group const identifier (default UPPER(name)_GROUP), or `false` to emit none.",
+          "oneOf": [
+            { "$ref": "#/$defs/ident" },
+            { "const": false }
+          ]
+        },
         "arrays": {
           "type": "object",
           "minProperties": 1,
@@ -71,11 +103,15 @@
       "additionalProperties": false,
       "properties": {
         "dtype": {
-          "description": "Zarr v3 core data type name.",
-          "enum": ["float32", "float64", "int32", "int64", "uint8", "bool"]
+          "description": "Zarr v3 data type name (core types + variable-length `string`).",
+          "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "bool", "string"]
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "const": {
+          "description": "Override the generated array const identifier (default UPPER(on-disk name)).",
+          "$ref": "#/$defs/ident"
+        }
       }
     }
   }
