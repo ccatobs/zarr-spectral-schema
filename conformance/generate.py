@@ -5,12 +5,14 @@ This is the seed of the inspector CLI's `emit-reference` (Slice 7, #8) and the
 *from* the spec, it cannot drift from it. Both bindings then validate the same
 emitted artifact.
 
+Slice 4 (#5) makes the generator placement-aware: it materialises the real
+on-disk hierarchy the writers produce — `scan_<NNNNNN>` groups, the L0
+`source`/`calibration` sub-groups, and (multi-frontend) `band_<M>` sub-groups —
+placing every declared array and attr at its spec-declared placement. Nothing is
+hand-coded per field; the shapes are derived entirely from the spec.
+
 Usage:
     python conformance/generate.py <out_dir>
-
-Writes:
-    <out_dir>/valid.zarr     — conformant store (every required field present)
-    <out_dir>/missing_data_5d.zarr — negative store (required array omitted)
 """
 
 from __future__ import annotations
@@ -27,9 +29,225 @@ SPEC = Path(__file__).resolve().parent.parent / "spec" / "schema.yaml"
 # integer/float names are all accepted by create_array(dtype=...) and round-trip
 # to the same on-disk `data_type` the writers emit (probed against zarr 3.2).
 
+# The scan group the fixtures wrap their content in (writer pads to 6 digits).
+_SCAN = "scan_000001"
+
 
 def load_spec() -> dict:
     return yaml.safe_load(SPEC.read_text(encoding="utf-8"))
+
+
+def _level_for(spec: dict, detect_attr: str) -> dict:
+    """Return the level whose ``detect`` attr equals ``detect_attr``."""
+    for level in spec["levels"].values():
+        if level.get("detect") == detect_attr:
+            return level
+    raise KeyError(f"no level detected by {detect_attr!r}")
+
+
+def _sample_attr(aspec: dict, name: str):
+    """A representative on-disk value for a declared attr of the given type."""
+    t = aspec["type"]
+    if t == "string":
+        return f"{name}_value"
+    if t == "integer":
+        return 1
+    if t == "number":
+        return 1.0
+    if t == "boolean":
+        return True
+    if t == "array":
+        return []
+    if t == "object":
+        return {}
+    raise ValueError(f"unhandled attr type {t!r} for {name!r}")
+
+
+def _write_attrs(group, declared: dict, omit_attrs: set[str], emit_optional: bool) -> None:
+    """Write declared attrs onto ``group``.
+
+    Required attrs are always emitted (a structurally-valid store needs them);
+    optional attrs are emitted only when ``emit_optional`` (so the fixtures carry
+    a realistic subset). ``omit_attrs`` drops specific attrs for negative stores.
+    """
+    for name, aspec in declared.items():
+        if name in omit_attrs:
+            continue
+        if not aspec.get("required", False) and not emit_optional:
+            continue
+        group.attrs[name] = _sample_attr(aspec, name)
+
+
+def _write_arrays(
+    parent,
+    group_spec: dict,
+    rel_prefix: str,
+    omit: set[str],
+    emit_optional: bool,
+) -> None:
+    """Create a group's arrays under ``parent``.
+
+    ``rel_prefix`` is the store-relative path of ``parent`` (for ``omit`` keys).
+    Required arrays are always created; optional arrays only when ``emit_optional``
+    (the fixtures emit a realistic subset so optional-present paths are exercised).
+    """
+    for array_name, aspec in group_spec.get("arrays", {}).items():
+        rel = f"{rel_prefix}/{array_name}"
+        if rel in omit:
+            continue
+        if not aspec.get("required", False) and not emit_optional:
+            continue
+        shape = tuple([1] * aspec["ndim"])
+        parent.create_array(name=array_name, shape=shape, dtype=aspec["dtype"])
+
+
+def _write_version_attrs(
+    root, spec: dict, level: str, overrides: dict[str, str | int]
+) -> None:
+    """Write the root version attrs for ``level``, encoded per their ``on_disk``.
+
+    Only the version(s) whose ``level`` matches are written, so an L1 store does
+    not accidentally carry ``l0_schema_version`` (which would flip detection).
+    """
+    for attr_name, vspec in spec.get("versions", {}).items():
+        if vspec["level"] != level:
+            continue
+        raw = overrides.get(attr_name, vspec["value"])
+        root.attrs[attr_name] = int(raw) if vspec["on_disk"] == "integer" else str(raw)
+
+
+# ── store emitters (one per shape) ─────────────────────────────────────────
+
+
+def emit_l0(
+    out_dir: Path,
+    *,
+    omit: set[str] | None = None,
+    omit_attrs: set[str] | None = None,
+    versions: dict[str, str | int] | None = None,
+) -> Path:
+    """Emit an L0 store: scan_000001/{source,calibration}/<arrays> + attrs.
+
+    ``versions`` overrides the on-disk ``l0_schema_version`` (integer axis) for
+    the version-negotiation fixtures while the structure stays spec-current.
+    """
+    omit = omit or set()
+    omit_attrs = omit_attrs or set()
+    spec = load_spec()
+    level = _level_for(spec, "l0_schema_version")
+
+    root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
+    _write_version_attrs(root, spec, "L0", versions or {})
+    _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
+
+    scan = root.require_group(_SCAN)
+    _write_attrs(scan, level.get("scan_attrs", {}), omit_attrs, emit_optional=True)
+
+    # L0 has two `placement: scan, inline: false` sub-groups (source/calibration).
+    for gname, gspec in level.get("groups", {}).items():
+        sub = scan.require_group(gname)
+        _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, emit_optional=True)
+    return out_dir
+
+
+def emit_l1_single(
+    out_dir: Path,
+    *,
+    omit: set[str] | None = None,
+    omit_attrs: set[str] | None = None,
+    versions: dict[str, str | int] | None = None,
+) -> Path:
+    """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
+
+    ``versions`` overrides the on-disk ``cal_schema_version`` for the
+    version-negotiation fixtures while the structure stays spec-current.
+    """
+    omit = omit or set()
+    omit_attrs = omit_attrs or set()
+    spec = load_spec()
+    level = _level_for(spec, "cal_schema_version")
+
+    root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
+    _write_version_attrs(root, spec, "L1", versions or {})
+    _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
+
+    scan = root.require_group(_SCAN)
+    # No band_<M> children ⇒ single-frontend: scan_attrs + scan_or_band_attrs
+    # both land on the scan group.
+    _write_attrs(scan, level.get("scan_attrs", {}), omit_attrs, emit_optional=True)
+    _write_attrs(
+        scan, level.get("scan_or_band_attrs", {}), omit_attrs, emit_optional=True
+    )
+
+    for gname, gspec in level.get("groups", {}).items():
+        if gspec.get("placement") != "scan_or_band":
+            continue
+        if gspec.get("inline", False):
+            _write_arrays(scan, gspec, _SCAN, omit, emit_optional=True)
+        else:
+            sub = scan.require_group(gname)
+            _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, emit_optional=True)
+    return out_dir
+
+
+def emit_l1_multi(
+    out_dir: Path,
+    *,
+    n_bands: int = 2,
+    omit: set[str] | None = None,
+    omit_attrs: set[str] | None = None,
+    omit_band_attrs: dict[int, set[str]] | None = None,
+) -> Path:
+    """Emit an L1 multi-frontend store: scan_000001/band_<M>/<arrays>.
+
+    Per the placement model, ``scan_or_band`` attrs/arrays land on EACH band;
+    ``line``/``rest_freq_hz`` are therefore band-level here (not on the scan
+    group), proving the rule is data-driven. ``omit_band_attrs`` drops attrs on a
+    specific band (for the missing-band_index negative).
+    """
+    omit = omit or set()
+    omit_attrs = omit_attrs or set()
+    omit_band_attrs = omit_band_attrs or {}
+    spec = load_spec()
+    level = _level_for(spec, "cal_schema_version")
+
+    root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
+    _write_version_attrs(root, spec, "L1", {})
+    _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
+
+    scan = root.require_group(_SCAN)
+    # Multi-frontend: scan_attrs on the scan group, but NOT scan_or_band_attrs
+    # (those move to each band).
+    _write_attrs(scan, level.get("scan_attrs", {}), omit_attrs, emit_optional=True)
+
+    sob_groups = {
+        name: g
+        for name, g in level.get("groups", {}).items()
+        if g.get("placement") == "scan_or_band"
+    }
+
+    for idx in range(n_bands):
+        band = scan.require_group(f"band_{idx}")
+        band_rel = f"{_SCAN}/band_{idx}"
+        drop = omit_attrs | omit_band_attrs.get(idx, set())
+        _write_attrs(band, level.get("band_attrs", {}), drop, emit_optional=True)
+        _write_attrs(
+            band, level.get("scan_or_band_attrs", {}), drop, emit_optional=True
+        )
+        for gname, gspec in sob_groups.items():
+            if gspec.get("inline", False):
+                _write_arrays(band, gspec, band_rel, omit, emit_optional=True)
+            else:
+                sub = band.require_group(gname)
+                _write_arrays(sub, gspec, f"{band_rel}/{gname}", omit, emit_optional=True)
+    return out_dir
+
+
+# ── back-compat shim ─────────────────────────────────────────────────────
+#
+# The version-negotiation fixtures address stores by `emit(...)`; keep that entry
+# point but make it produce a structurally-valid L1 single-frontend store so the
+# only thing those tests exercise is the version range check (not structure).
 
 
 def emit(
@@ -37,51 +255,31 @@ def emit(
     omit: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
 ) -> Path:
-    """Emit one store from the spec.
+    """Emit a structurally-valid L1 single-frontend store (version fixtures' base).
 
-    ``omit`` drops array paths (for missing-required negatives). ``versions``
-    overrides on-disk version-attribute values (for the version-negotiation
-    fixtures) — e.g. ``{"cal_schema_version": "1.9"}`` writes a newer-minor store
-    while every structural array stays spec-current.
+    ``omit`` and ``versions`` are forwarded to :func:`emit_l1_single`. The array
+    ``omit`` keys are store-relative paths under the scan group (e.g.
+    ``scan_000001/spectra``).
     """
-    omit = omit or set()
-    overrides = versions or {}
-    spec = load_spec()
-    root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
-
-    # Producer-owned version attributes, encoded per `on_disk`. A caller-supplied
-    # override stands in for the spec's current `value` so a store can carry an
-    # older / newer-minor / newer-major version than this build knows.
-    for attr_name, vspec in spec.get("versions", {}).items():
-        raw = overrides.get(attr_name, vspec["value"])
-        value = int(raw) if vspec["on_disk"] == "integer" else str(raw)
-        root.attrs[attr_name] = value
-
-    # Structural arrays: group '<g>' / array '<g>/<a>', shape = unit-length in
-    # every dimension (ndim from the spec). Content is irrelevant to the L0–L1
-    # *contract*; only metadata is validated.
-    for level in spec.get("levels", {}).values():
-        for group_name, group in level.get("groups", {}).items():
-            g = root.require_group(group_name)
-            for array_name, aspec in group.get("arrays", {}).items():
-                rel = f"{group_name}/{array_name}"
-                if rel in omit:
-                    continue
-                shape = tuple([1] * aspec["ndim"])
-                g.create_array(name=array_name, shape=shape, dtype=aspec["dtype"])
-    return out_dir
+    return emit_l1_single(out_dir, omit=omit, versions=versions)
 
 
 # Version-negotiation fixtures (Slice 3, #4). Each overrides one on-disk version
-# relative to the spec's current `value` (l0=2 integer, cal=1.3); structure stays
-# spec-current so the only thing under test is the version range check. Expected
-# outcome is named for the binding tests that validate these same stores.
+# relative to the spec's current `value` (cal=1.3); structure stays spec-current
+# so the only thing under test is the version range check. Expected outcome is
+# named for the binding tests that validate these same stores.
 VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
     "ver_older.zarr": {"cal_schema_version": "1.2"},        # older minor → pass, no warning
     "ver_newer_minor.zarr": {"cal_schema_version": "1.9"},  # newer minor → warn once, pass
     "ver_newer_major.zarr": {"cal_schema_version": "2.0"},  # newer major → error
-    "ver_l0_newer_major.zarr": {"l0_schema_version": 3},    # integer axis, newer major → error
     "ver_below_floor.zarr": {"cal_schema_version": "0.9"},  # below min_supported → error
+}
+
+# The integer-axis (L0) negotiation fixture is a structurally-valid L0 store with
+# its `l0_schema_version` overridden; it lives in its own dict because it is
+# emitted by `emit_l0`, not the L1 `emit` shim above.
+L0_VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
+    "ver_l0_newer_major.zarr": {"l0_schema_version": 3},    # integer axis, newer major → error
 }
 
 
@@ -91,12 +289,28 @@ def main() -> None:
         raise SystemExit(2)
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    emit(out / "valid.zarr")
-    emit(out / "missing_data_5d.zarr", omit={"source/data_5d"})
-    print(f"emitted: {out/'valid.zarr'}")
-    print(f"emitted: {out/'missing_data_5d.zarr'}")
+
+    # The three structural shapes both bindings validate green.
+    emit_l0(out / "l0.zarr")
+    emit_l1_single(out / "l1_single.zarr")
+    emit_l1_multi(out / "l1_multi.zarr")
+    print(f"emitted: {out/'l0.zarr'}")
+    print(f"emitted: {out/'l1_single.zarr'}")
+    print(f"emitted: {out/'l1_multi.zarr'}")
+
+    # Structural negatives both bindings reject (naming the path/attr).
+    emit_l1_single(out / "miss_array.zarr", omit={"scan_000001/spectra"})
+    emit_l1_multi(out / "miss_band_index.zarr", omit_band_attrs={1: {"band_index"}})
+    print(f"emitted: {out/'miss_array.zarr'}")
+    print(f"emitted: {out/'miss_band_index.zarr'}")
+
+    # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
+    # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.
     for name, versions in VERSION_FIXTURES.items():
         emit(out / name, versions=versions)
+        print(f"emitted: {out/name}")
+    for name, versions in L0_VERSION_FIXTURES.items():
+        emit_l0(out / name, versions=versions)
         print(f"emitted: {out/name}")
 
 
