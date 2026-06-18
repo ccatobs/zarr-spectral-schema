@@ -11,13 +11,20 @@ Root of the zarr-store dependency chain — a sibling to `calibrate`, `zarr_fits
 and `yoda` under `chai-software/`, the same *shape* as `data-center` at the root
 of the ops-db chain (different domain, not co-located).
 
-## Status: scaffolding
+## Status: v1 in progress
 
-The design is settled; the code is not yet built. **Start here:**
+The spec and both bindings are live and tested; the contract is being filled in
+slice by slice (epic #1). **Start here:**
 
 1. Read **`docs/adr/0007-zarr-spectral-schema-shared-source-of-truth.md`** — the binding decisions (its authoritative home is this repo).
 2. Read the **epic (issue #1)** and its child issues — the tracer-bullet rollout.
-3. Begin with **Slice 1** (the tracer bullet: repo skeleton + spec DSL + one field end-to-end). Do **not** bulk-port before the one-field path is green.
+3. Skim **`spec/schema.yaml`** (the single source of truth) and the conformance tests beside it.
+
+Landed so far: the spec DSL + one field end-to-end (Slice 1, #2); the full
+cal-schema constant surface generated from the spec, with `calibrate` consuming
+this crate git-pinned (Slice 2, #3); two-axis version negotiation —
+warn-once-minor / error-major (Slice 3, #4). Next: port the full L0+L1
+structural contract into the spec (Slice 4, #5).
 
 ## Design in one breath
 
@@ -30,13 +37,13 @@ The design is settled; the code is not yet built. **Start here:**
 
 Full rationale: ADR-0007 and the epic.
 
-## Layout (target — created by the scaffolding slices)
+## Layout
 
 ```
 spec/             # source of truth — schema.yaml + meta-schema (self-validating DSL)
-bindings/rust/    # build.rs codegen → consts (cal-schema migrates here)
-bindings/python/  # package; ships + loads the spec as package data
+bindings/rust/    # build.rs codegen → consts (cal-schema re-exports these)
+bindings/python/  # package; ships + loads the spec as package data; `python -m zarr_spectral_schema validate`
 conformance/      # golden fixtures (synthetic + frozen-legacy) + parity tests
-cli/              # inspector: validate / describe / diff / emit-reference
+cli/              # inspector: validate / describe / diff / emit-reference (full surface = #8)
 docs/             # ADRs + the format spec graduated from chai-software/ARCHITECTURE.md
 ```
