@@ -58,3 +58,73 @@ fn missing_data_5d_is_rejected() {
         "expected rejection mentioning source/data_5d, got: {problems:?}"
     );
 }
+
+// ── version negotiation (Slice 3, #4) — validates the SAME spec-emitted
+// version fixtures the Python binding does, proving one interpretation. ──
+
+#[test]
+fn version_equal_is_green() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("valid.zarr"));
+    assert!(r.ok(), "expected green, got: {:?}", r.errors);
+    assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
+}
+
+#[test]
+fn version_older_minor_is_green() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("ver_older.zarr"));
+    assert!(r.ok(), "expected green, got: {:?}", r.errors);
+    assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
+}
+
+#[test]
+fn version_newer_minor_warns_but_passes() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("ver_newer_minor.zarr"));
+    assert!(r.ok(), "newer-minor must still pass, got errors: {:?}", r.errors);
+    assert_eq!(r.warnings.len(), 1, "expected one warning, got: {:?}", r.warnings);
+    let w = &r.warnings[0];
+    assert!(
+        w.contains("cal_schema_version") && w.contains("1.9") && w.contains("1.3"),
+        "warning should name the axis and both versions, got: {w}"
+    );
+    // Back-compat: validate() returns errors only → empty for a warning-only store.
+    assert!(zss::validate(&f.join("ver_newer_minor.zarr")).is_empty());
+}
+
+#[test]
+fn version_newer_major_errors() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("ver_newer_major.zarr"));
+    assert!(!r.ok(), "newer-major must error");
+    assert!(
+        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("2.0")),
+        "expected newer-major error, got: {:?}",
+        r.errors
+    );
+}
+
+#[test]
+fn version_l0_integer_newer_major_errors() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("ver_l0_newer_major.zarr"));
+    assert!(!r.ok(), "integer newer-major must error");
+    assert!(
+        r.errors.iter().any(|e| e.contains("l0_schema_version")),
+        "expected l0 error, got: {:?}",
+        r.errors
+    );
+}
+
+#[test]
+fn version_below_floor_errors() {
+    let f = emit_fixtures();
+    let r = zss::check(&f.join("ver_below_floor.zarr"));
+    assert!(!r.ok(), "below-min_supported must error");
+    assert!(
+        r.errors.iter().any(|e| e.contains("cal_schema_version")),
+        "expected below-floor error, got: {:?}",
+        r.errors
+    );
+}

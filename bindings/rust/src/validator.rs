@@ -5,9 +5,13 @@
 //! parsed at runtime from the same synced spec the consts are generated from,
 //! so consts and validator cannot diverge.
 //!
-//! Slice 1 (tracer) scope: presence + on-disk encoding of declared versions,
-//! and presence + dtype/ndim of declared required arrays. The `>= min_supported`
-//! negotiation (warn-minor / error-major) lands in Slice 3 (#4).
+//! Two checks: structure (presence + dtype/ndim of declared required arrays) and
+//! version negotiation (Slice 3, #4) — each producer-owned on-disk version is
+//! range-checked against the spec's supported window (`min_supported` .. `value`):
+//! below the floor or a newer *major* is an error; a newer *minor* is a single
+//! warning (additive, validation still passes); older-or-equal within the window
+//! passes silently. `validate` returns errors only (back-compat); `check` returns
+//! the full [`ValidationResult`] with warnings.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -23,14 +27,12 @@ struct Spec {
 #[derive(Deserialize)]
 struct VersionSpec {
     on_disk: String,
-    // `level`, `value`, `min_supported` are carried by the contract but unused in
-    // the tracer's checks; kept so the struct round-trips the full DSL entry.
+    value: String,
+    min_supported: String,
+    // `level` is carried by the contract but unused in the checks; kept so the
+    // struct round-trips the full DSL entry.
     #[allow(dead_code)]
     level: String,
-    #[allow(dead_code)]
-    value: String,
-    #[allow(dead_code)]
-    min_supported: String,
 }
 
 #[derive(Deserialize)]
@@ -50,24 +52,45 @@ struct ArraySpec {
     required: bool,
 }
 
+/// Outcome of validating a store: hard `errors` and advisory `warnings`.
+#[derive(Debug, Default)]
+pub struct ValidationResult {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+impl ValidationResult {
+    /// True when the store is conformant — warnings do not make it fail.
+    pub fn ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
 fn load_spec() -> Spec {
     // The synced copy that build.rs also reads; include_str! is relative to this file.
     serde_yaml::from_str(include_str!("../spec/schema.yaml")).expect("parse synced spec/schema.yaml")
 }
 
-/// Validate a Zarr v3 store against the spec. Returns problems; empty = conformant.
+/// Validate a Zarr v3 store against the spec. Returns errors; empty = conformant.
+///
+/// Back-compat surface. Use [`check`] to also surface newer-minor warnings.
 pub fn validate(store: &Path) -> Vec<String> {
+    check(store).errors
+}
+
+/// Validate a Zarr v3 store against the spec, returning errors and warnings.
+pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
-    let mut problems = Vec::new();
+    let mut result = ValidationResult::default();
 
     let root = match read_json(&store.join("zarr.json")) {
         Some(v) if v.get("node_type").and_then(|n| n.as_str()) == Some("group") => v,
         _ => {
-            problems.push(format!(
+            result.errors.push(format!(
                 "{}: not a Zarr v3 group (missing/!group root zarr.json)",
                 store.display()
             ));
-            return problems;
+            return result;
         }
     };
     let empty = serde_json::Map::new();
@@ -76,20 +99,37 @@ pub fn validate(store: &Path) -> Vec<String> {
         .and_then(|a| a.as_object())
         .unwrap_or(&empty);
 
-    // Version attributes (store-and-forward identity lives at root in v1).
+    // Version attributes (store-and-forward identity lives at root in v1):
+    // presence, on-disk encoding, then range negotiation.
     for (attr_name, vspec) in &spec.versions {
-        match root_attrs.get(attr_name) {
-            None => problems.push(format!("root attribute '{attr_name}' is required but missing")),
-            Some(value) => match vspec.on_disk.as_str() {
-                "integer" if !(value.is_i64() || value.is_u64()) => problems.push(format!(
-                    "root attribute '{attr_name}' must be an integer on disk, got {value}"
-                )),
-                "string" if !value.is_string() => problems.push(format!(
-                    "root attribute '{attr_name}' must be a string on disk, got {value}"
-                )),
-                _ => {}
+        let Some(value) = root_attrs.get(attr_name) else {
+            result
+                .errors
+                .push(format!("root attribute '{attr_name}' is required but missing"));
+            continue;
+        };
+        let disk = match vspec.on_disk.as_str() {
+            "integer" => match value.as_i64() {
+                Some(i) => i.to_string(),
+                None => {
+                    result.errors.push(format!(
+                        "root attribute '{attr_name}' must be an integer on disk, got {value}"
+                    ));
+                    continue;
+                }
             },
-        }
+            "string" => match value.as_str() {
+                Some(s) => s.to_string(),
+                None => {
+                    result.errors.push(format!(
+                        "root attribute '{attr_name}' must be a string on disk, got {value}"
+                    ));
+                    continue;
+                }
+            },
+            _ => value.to_string(),
+        };
+        negotiate(attr_name, vspec, &disk, &mut result);
     }
 
     // Structural arrays: group '<g>' / array '<g>/<a>'.
@@ -102,7 +142,9 @@ pub fn validate(store: &Path) -> Vec<String> {
                 let rel = format!("{group_name}/{array_name}");
                 let meta = read_json(&store.join(group_name).join(array_name).join("zarr.json"));
                 let Some(meta) = meta else {
-                    problems.push(format!("[{level_name}] required array '{rel}' is missing"));
+                    result
+                        .errors
+                        .push(format!("[{level_name}] required array '{rel}' is missing"));
                     continue;
                 };
                 let dtype = meta.get("data_type").and_then(|d| d.as_str()).unwrap_or("");
@@ -111,13 +153,13 @@ pub fn validate(store: &Path) -> Vec<String> {
                     .and_then(|s| s.as_array())
                     .map_or(0, |a| a.len());
                 if dtype != aspec.dtype {
-                    problems.push(format!(
+                    result.errors.push(format!(
                         "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
                         aspec.dtype
                     ));
                 }
                 if ndim != aspec.ndim {
-                    problems.push(format!(
+                    result.errors.push(format!(
                         "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
                         aspec.ndim
                     ));
@@ -125,7 +167,56 @@ pub fn validate(store: &Path) -> Vec<String> {
             }
         }
     }
-    problems
+    result
+}
+
+/// Range-negotiate one on-disk version against the spec's supported window. The
+/// two axes are major (breaking → error) and minor (additive → warn); an integer
+/// version (no minor) only exercises major.
+fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut ValidationResult) {
+    let Some(store) = parse_version(disk) else {
+        result
+            .errors
+            .push(format!("root attribute '{attr_name}': cannot parse version {disk:?}"));
+        return;
+    };
+    let (Some(current), Some(floor)) =
+        (parse_version(&vspec.value), parse_version(&vspec.min_supported))
+    else {
+        // The meta-schema guarantees these parse; defensive.
+        result
+            .errors
+            .push(format!("root attribute '{attr_name}': spec version range is malformed"));
+        return;
+    };
+
+    if store < floor {
+        result.errors.push(format!(
+            "root attribute '{attr_name}': store version {disk} is older than the minimum supported ({})",
+            vspec.min_supported
+        ));
+    } else if store.0 > current.0 {
+        result.errors.push(format!(
+            "root attribute '{attr_name}': store version {disk} is a newer major than this build supports ({}); refusing to validate",
+            vspec.value
+        ));
+    } else if store.0 == current.0 && store.1 > current.1 {
+        result.warnings.push(format!(
+            "root attribute '{attr_name}': store version {disk} is a newer minor than this build knows ({}); additive new fields are ignored",
+            vspec.value
+        ));
+    }
+}
+
+/// Parse `major[.minor]` (or a bare integer) into a `(major, minor)` tuple.
+fn parse_version(s: &str) -> Option<(u64, u64)> {
+    let mut parts = s.trim().split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = match parts.next() {
+        Some(m) => m.parse::<u64>().ok()?,
+        None => 0,
+    };
+    Some((major, minor))
 }
 
 fn read_json(path: &Path) -> Option<serde_json::Value> {
