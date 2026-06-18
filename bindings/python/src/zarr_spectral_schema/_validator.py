@@ -4,9 +4,17 @@ Judgment-free: it walks the declarative spec and checks a normalized store view
 against it. No field is special-cased — every rule comes from the spec — so the
 Python and Rust validators implement the *same* interpretation and cannot drift.
 
-Two checks today:
+Three checks today:
 
-* **Structure** — presence + dtype/ndim of declared required arrays.
+* **Level detection** (Slice 4, #5) — a store is L0 *or* L1, detected by which
+  per-level ``detect`` root attr it carries (``l0_schema_version`` ⇒ L0,
+  ``cal_schema_version`` ⇒ L1). A store declaring no known level is an error.
+* **Structure** — the full L0+L1 contract, interpreted from the spec's
+  ``placement``/``inline`` group fields and the per-level ``*_attrs`` sections.
+  Root attrs, per-scan attrs, per-band attrs (multi-frontend), the scan-or-band
+  arrays/attrs, the L0 ``source``/``calibration`` sub-groups, and the diagnostic
+  ``skydiff``/``skychopdiff`` sub-groups are all resolved by the same generic
+  walk — never hand-branched per field.
 * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
   (``l0_schema_version`` integer, ``cal_schema_version`` ``major.minor``) is
   range-checked against the spec's supported window (``min_supported`` ..
@@ -20,11 +28,28 @@ returns the full :class:`ValidationResult` with warnings.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._spec import load_spec
 from ._store import StoreView, read_store
+
+# Scan groups are ``scan_<6-digit>`` (writer: ``scan_{:06}``); band sub-groups are
+# ``band_<index>`` (writer: ``band_{band_index}``, base-0, no zero-pad).
+_SCAN_RE = re.compile(r"^scan_\d{6}$")
+_BAND_RE = re.compile(r"^band_\d+$")
+
+# Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
+# `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
+_TYPE_CHECKS = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+}
 
 
 @dataclass
@@ -63,9 +88,199 @@ def validate_view(view: StoreView, spec: dict) -> list[str]:
 def check_view(view: StoreView, spec: dict) -> ValidationResult:
     result = ValidationResult()
 
-    # Version attributes live in root attrs (store-and-forward identity travels
-    # at root in v1). Check presence, on-disk encoding, then range-negotiate.
+    levels = spec.get("levels", {})
+
+    # ── level detection ────────────────────────────────────────────────────
+    # A store is exactly one level, marked by which `detect` root attr it carries.
+    applicable = {
+        name: level
+        for name, level in levels.items()
+        if level.get("detect") and level["detect"] in view.root_attrs
+    }
+    if not applicable:
+        detects = sorted(
+            level["detect"] for level in levels.values() if level.get("detect")
+        )
+        result.errors.append(
+            "store declares no known level: none of the detect attributes "
+            f"{detects} are present in root attributes"
+        )
+        return result
+
+    # Negotiate only the versions belonging to a detected level: an L0 store
+    # carries l0_schema_version, an L1 store cal_schema_version — checking the
+    # absent one would spuriously fail every single-level store.
+    applicable_level_names = set(applicable)
+    _negotiate_versions(view, spec, applicable_level_names, result)
+
+    for level_name, level in applicable.items():
+        _check_level(view, level_name, level, result)
+
+    return result
+
+
+def _check_level(
+    view: StoreView, level_name: str, level: dict, result: ValidationResult
+) -> None:
+    """Walk one applicable level's structural contract against the store view."""
+    # Root attrs declared for this level.
+    _check_attrs(
+        view.root_attrs, level.get("root_attrs", {}), "root", level_name, result
+    )
+
+    groups = level.get("groups", {})
+
+    # `scan` groups: arrays/attrs placed relative to each scan group. We only
+    # require scan groups when the level actually declares scan-relative content.
+    needs_scans = bool(
+        level.get("scan_attrs")
+        or level.get("band_attrs")
+        or level.get("scan_or_band_attrs")
+        or groups
+    )
+    scan_groups = sorted(p for p in view.group_attrs if _SCAN_RE.match(p))
+    if needs_scans and not scan_groups:
+        result.errors.append(
+            f"[{level_name}] no scan_<NNNNNN> groups found at the store root"
+        )
+        return
+
+    # Split groups by placement so we walk each in the right target dir.
+    scan_groups_spec = {
+        name: g for name, g in groups.items() if g.get("placement") == "scan"
+    }
+    sob_groups_spec = {
+        name: g for name, g in groups.items() if g.get("placement") == "scan_or_band"
+    }
+
+    for sg in scan_groups:
+        bands = sorted(
+            p
+            for p in view.group_attrs
+            if p.startswith(f"{sg}/") and _BAND_RE.match(p[len(sg) + 1 :])
+        )
+        multi = bool(bands)
+
+        # Per-scan-group attrs always checked at the scan group itself.
+        _check_attrs(
+            view.group_attrs[sg],
+            level.get("scan_attrs", {}),
+            sg,
+            level_name,
+            result,
+        )
+
+        # Multi-frontend: per-band attrs on each band group.
+        if multi:
+            for b in bands:
+                _check_attrs(
+                    view.group_attrs.get(b, {}),
+                    level.get("band_attrs", {}),
+                    b,
+                    level_name,
+                    result,
+                )
+
+        # scan_or_band resolves to the scan group (single) or each band (multi).
+        targets = bands if multi else [sg]
+        for t in targets:
+            target_attrs = view.group_attrs.get(t, {})
+            _check_attrs(
+                target_attrs,
+                level.get("scan_or_band_attrs", {}),
+                t,
+                level_name,
+                result,
+            )
+            for gname, group in sob_groups_spec.items():
+                _check_group_arrays(view, t, gname, group, level_name, result)
+
+        # `placement: scan` groups (L0 source/calibration) live under the scan
+        # group regardless of multi-frontend.
+        for gname, group in scan_groups_spec.items():
+            _check_group_arrays(view, sg, gname, group, level_name, result)
+
+
+def _check_group_arrays(
+    view: StoreView,
+    base: str,
+    group_name: str,
+    group: dict,
+    level_name: str,
+    result: ValidationResult,
+) -> None:
+    """Check one group's arrays under ``base``.
+
+    ``inline`` groups place arrays directly in ``base``; otherwise they sit under
+    ``base/<group_name>/``. Required arrays must exist (dtype + ndim checked);
+    optional arrays are checked only when present.
+    """
+    inline = group.get("inline", False)
+    prefix = base if inline else f"{base}/{group_name}"
+    for array_name, aspec in group.get("arrays", {}).items():
+        rel = f"{prefix}/{array_name}"
+        arr = view.arrays.get(rel)
+        if arr is None:
+            if aspec.get("required", False):
+                result.errors.append(
+                    f"[{level_name}] required array '{rel}' is missing"
+                )
+            continue
+        if arr.dtype != aspec["dtype"]:
+            result.errors.append(
+                f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected "
+                f"{aspec['dtype']!r}"
+            )
+        if arr.ndim != aspec["ndim"]:
+            result.errors.append(
+                f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected "
+                f"{aspec['ndim']}"
+            )
+
+
+def _check_attrs(
+    attrs: dict,
+    declared: dict,
+    where: str,
+    level_name: str,
+    result: ValidationResult,
+) -> None:
+    """Check declared attrs at one placement location.
+
+    Required attrs must be present and (if present) type-checked; optional attrs
+    are type-checked only when present. ``where`` is the store path used in
+    messages (``root`` or a group path) so failures point at the exact location.
+    """
+    for name, aspec in declared.items():
+        present = name in attrs
+        if not present:
+            if aspec.get("required", False):
+                result.errors.append(
+                    f"[{level_name}] required attribute '{name}' is missing at "
+                    f"'{where}'"
+                )
+            continue
+        expected = aspec["type"]
+        checker = _TYPE_CHECKS.get(expected)
+        if checker is not None and not checker(attrs[name]):
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must be of type "
+                f"{expected!r}, got {attrs[name]!r}"
+            )
+
+
+def _negotiate_versions(
+    view: StoreView, spec: dict, levels: set[str], result: ValidationResult
+) -> None:
+    """Presence/encoding check + two-axis range negotiation for on-disk versions.
+
+    Only versions whose ``level`` is in ``levels`` (the detected level(s)) are
+    negotiated, so a single-level store is not penalised for lacking the other
+    level's version attr.
+    """
     for attr_name, vspec in spec.get("versions", {}).items():
+        if vspec.get("level") not in levels:
+            continue
         if attr_name not in view.root_attrs:
             result.errors.append(f"root attribute '{attr_name}' is required but missing")
             continue
@@ -84,28 +299,6 @@ def check_view(view: StoreView, spec: dict) -> ValidationResult:
         errors, warnings = _negotiate(attr_name, vspec, value)
         result.errors.extend(errors)
         result.warnings.extend(warnings)
-
-    # Structural arrays. In v1, a group at level L maps to the store-relative
-    # path '<group>' and its arrays to '<group>/<array>'.
-    for level_name, level in spec.get("levels", {}).items():
-        for group_name, group in level.get("groups", {}).items():
-            for array_name, aspec in group.get("arrays", {}).items():
-                if not aspec.get("required", False):
-                    continue
-                rel = f"{group_name}/{array_name}"
-                arr = view.arrays.get(rel)
-                if arr is None:
-                    result.errors.append(f"[{level_name}] required array '{rel}' is missing")
-                    continue
-                if arr.dtype != aspec["dtype"]:
-                    result.errors.append(
-                        f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
-                    )
-                if arr.ndim != aspec["ndim"]:
-                    result.errors.append(
-                        f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
-                    )
-    return result
 
 
 def _negotiate(attr_name: str, vspec: dict, value: object) -> tuple[list[str], list[str]]:

@@ -25,8 +25,12 @@ import zarr_spectral_schema as zss  # noqa: E402
 @pytest.fixture(scope="module")
 def stores(tmp_path_factory) -> Path:
     out = tmp_path_factory.mktemp("stores")
-    generate.emit(out / "valid.zarr")
-    generate.emit(out / "missing_data_5d.zarr", omit={"source/data_5d"})
+    # A structurally-valid L1 single-frontend store (scan_000001/<arrays>) and a
+    # negative dropping a required array; the tracer's point is the presence
+    # check, so the shape moved to the real scan-wrapped hierarchy but the
+    # intent — valid green, missing-required red — is unchanged.
+    generate.emit_l1_single(out / "valid.zarr")
+    generate.emit_l1_single(out / "missing_spectra.zarr", omit={"scan_000001/spectra"})
     return out
 
 
@@ -42,6 +46,14 @@ def test_constants_derived_from_spec():
     assert zss.L1_COMPLETE_ATTR == "l1_complete"  # marker
     assert zss.SOURCE_MODES == ("ON", "OFF", "OTF-ON", "OTF-OFF")  # list const
     assert zss.CAL_COORDS[7:9] == ("thot", "tcold")  # calibration-only coords, in order
+    # Full L0+L1 contract (#5): the hard-coded L1 array names and the optional
+    # L0 load-temp tables now generate consts additively, matching the Rust binding.
+    assert zss.T_OFF == "t_off"
+    assert zss.S_H_OBS == "s_h_obs"
+    assert zss.T_SKY_FIT == "t_sky_fit"
+    assert zss.T_CAL == "t_cal"  # on disk t_cal, from t_cal_1d
+    assert zss.LOAD_TEMP_SIG_5D == "load_temp_sig_5d"
+    assert zss.LOAD_TEMP_IMG_5D == "load_temp_img_5d"
 
 
 def test_valid_store_is_green(stores):
@@ -49,6 +61,6 @@ def test_valid_store_is_green(stores):
     assert problems == [], problems
 
 
-def test_missing_data_5d_is_rejected(stores):
-    problems = zss.validate(stores / "missing_data_5d.zarr")
-    assert any("source/data_5d" in p for p in problems), problems
+def test_missing_required_array_is_rejected(stores):
+    problems = zss.validate(stores / "missing_spectra.zarr")
+    assert any("scan_000001/spectra" in p for p in problems), problems

@@ -1,10 +1,16 @@
-//! Tracer-bullet conformance test (Rust binding).
+//! Full L0+L1 structural-contract conformance test (Rust binding) — Slice 4 (#5).
 //!
 //! Emits the synthetic stores from the spec via the shared Python generator (the
 //! single emitter; the "binding parity" leg), then validates them with the Rust
 //! interpreter. The Python binding validates the equivalent stores
-//! (conformance/test_tracer.py) — together they are the cross-binding proof that
-//! one spec drives one interpretation in both languages.
+//! (conformance/test_full_contract.py, test_version_negotiation.py) — together
+//! they are the cross-binding proof that one spec drives one interpretation in
+//! both languages.
+//!
+//! The generator's `main()` emits, into the target dir: the three structural
+//! shapes (`l0.zarr`, `l1_single.zarr`, `l1_multi.zarr`), the structural
+//! negatives (`miss_array.zarr`, `miss_band_index.zarr`), and the
+//! version-negotiation fixtures (`ver_*.zarr`).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -42,21 +48,84 @@ fn constants_generated_from_spec() {
     assert_eq!(zss::L0_SCHEMA_VERSION, "2");
 }
 
+// ── positive: each shape validates green ───────────────────────────────────
+
 #[test]
-fn valid_store_is_green() {
-    let fixtures = emit_fixtures();
-    let problems = zss::validate(&fixtures.join("valid.zarr"));
+fn l0_store_is_green() {
+    let f = emit_fixtures();
+    let problems = zss::validate(&f.join("l0.zarr"));
     assert!(problems.is_empty(), "expected green, got: {problems:?}");
 }
 
 #[test]
-fn missing_data_5d_is_rejected() {
-    let fixtures = emit_fixtures();
-    let problems = zss::validate(&fixtures.join("missing_data_5d.zarr"));
+fn l1_single_frontend_is_green() {
+    let f = emit_fixtures();
+    let problems = zss::validate(&f.join("l1_single.zarr"));
+    assert!(problems.is_empty(), "expected green, got: {problems:?}");
+}
+
+#[test]
+fn l1_multi_frontend_is_green() {
+    let f = emit_fixtures();
+    let problems = zss::validate(&f.join("l1_multi.zarr"));
+    assert!(problems.is_empty(), "expected green, got: {problems:?}");
+}
+
+// ── negatives: structural failures name the offending path/attr ────────────
+
+#[test]
+fn missing_required_array_is_rejected() {
+    let f = emit_fixtures();
+    let problems = zss::validate(&f.join("miss_array.zarr"));
     assert!(
-        problems.iter().any(|p| p.contains("source/data_5d")),
-        "expected rejection mentioning source/data_5d, got: {problems:?}"
+        problems.iter().any(|p| p.contains("scan_000001/spectra")),
+        "expected rejection naming scan_000001/spectra, got: {problems:?}"
     );
+}
+
+#[test]
+fn multi_missing_band_index_is_rejected() {
+    let f = emit_fixtures();
+    let problems = zss::validate(&f.join("miss_band_index.zarr"));
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("band_index") && p.contains("band_1")),
+        "expected rejection naming band_index on band_1, got: {problems:?}"
+    );
+}
+
+#[test]
+fn store_with_no_level_is_rejected() {
+    // A bare group carrying neither detect attr declares no known level. Build it
+    // by hand (no version attrs) so the generator stays the single emitter.
+    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("zss_rust_bare_{}_{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("zarr.json"),
+        r#"{"zarr_format":3,"node_type":"group","attributes":{}}"#,
+    )
+    .unwrap();
+    let problems = zss::validate(&dir);
+    assert!(
+        problems.iter().any(|p| p.contains("no known level")),
+        "expected no-known-level rejection, got: {problems:?}"
+    );
+}
+
+// ── the scan-or-band rule is DATA-driven, not hand-branched ────────────────
+
+#[test]
+fn scan_or_band_rule_is_data_driven() {
+    // Both stores carry the same scan_or_band_attrs declaration; the validator
+    // resolves the target from band_<M> presence, never a special case — so a
+    // single-frontend store (line/rest_freq_hz at the scan group) and a
+    // multi-frontend store (those attrs on each band) both validate green.
+    let f = emit_fixtures();
+    assert!(zss::validate(&f.join("l1_single.zarr")).is_empty());
+    assert!(zss::validate(&f.join("l1_multi.zarr")).is_empty());
 }
 
 // ── version negotiation (Slice 3, #4) — validates the SAME spec-emitted
@@ -65,7 +134,7 @@ fn missing_data_5d_is_rejected() {
 #[test]
 fn version_equal_is_green() {
     let f = emit_fixtures();
-    let r = zss::check(&f.join("valid.zarr"));
+    let r = zss::check(&f.join("l1_single.zarr"));
     assert!(r.ok(), "expected green, got: {:?}", r.errors);
     assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
 }
@@ -127,4 +196,42 @@ fn version_below_floor_errors() {
         "expected below-floor error, got: {:?}",
         r.errors
     );
+}
+
+// ── real writer-produced stores (skipped if the fixture is absent) ─────────
+//
+// The correctness gate: a real cal-io L1 store (not a spec-emitted synthetic)
+// must validate green — if the spec marked something required that the writer
+// only conditionally emits, this fails. Generate the fixtures with cal-io's
+// ignored generators and point PARITY_TEST_DIR at the output base:
+//   PARITY_TEST_DIR=<dir> cargo test -p cal-io --test generate_l1_test_store -- --ignored
+//   PARITY_TEST_DIR=<dir> cargo test -p cal-io --test generate_multi_frontend_l1_test_store -- --ignored
+
+/// Resolve `$PARITY_TEST_DIR/l1_test_data/<name>` if it exists.
+fn real_store(name: &str) -> Option<PathBuf> {
+    let dir = std::env::var("PARITY_TEST_DIR").ok()?;
+    let p = PathBuf::from(dir).join("l1_test_data").join(name);
+    p.exists().then_some(p)
+}
+
+#[test]
+fn real_single_frontend_store_is_green() {
+    let Some(real) = real_store("synthetic_l1.zarr") else {
+        eprintln!("skipping: real single-frontend fixture absent (set PARITY_TEST_DIR)");
+        return;
+    };
+    let r = zss::check(&real);
+    assert!(r.ok(), "real store must validate green, got errors: {:?}", r.errors);
+    assert!(r.errors.is_empty());
+}
+
+#[test]
+fn real_multi_frontend_store_is_green() {
+    let Some(real) = real_store("synthetic_l1_multi.zarr") else {
+        eprintln!("skipping: real multi-frontend fixture absent (set PARITY_TEST_DIR)");
+        return;
+    };
+    let r = zss::check(&real);
+    assert!(r.ok(), "real multi-frontend store must validate green, got errors: {:?}", r.errors);
+    assert!(r.errors.is_empty());
 }

@@ -71,6 +71,14 @@
       "required": ["groups"],
       "additionalProperties": false,
       "properties": {
+        "detect": {
+          "description": "Root attribute whose presence marks a store as this level (e.g. l0_schema_version).",
+          "type": "string"
+        },
+        "root_attrs": { "$ref": "#/$defs/attrs" },
+        "scan_attrs": { "$ref": "#/$defs/attrs" },
+        "band_attrs": { "$ref": "#/$defs/attrs" },
+        "scan_or_band_attrs": { "$ref": "#/$defs/attrs" },
         "groups": {
           "type": "object",
           "minProperties": 1,
@@ -90,11 +98,36 @@
             { "const": false }
           ]
         },
+        "placement": {
+          "description": "Where this group's arrays live relative to a scan group. `scan`: under scan_<N>; `scan_or_band`: under scan_<N> (single-frontend) or each band_<M> (multi-frontend).",
+          "enum": ["scan", "scan_or_band"]
+        },
+        "inline": {
+          "description": "true ⇒ arrays sit directly in the target dir (no sub-group path segment); false ⇒ under <target>/<groupname>/.",
+          "type": "boolean"
+        },
         "arrays": {
           "type": "object",
           "minProperties": 1,
           "additionalProperties": { "$ref": "#/$defs/array" }
         }
+      }
+    },
+    "attrs": {
+      "description": "On-disk attribute declarations for one placement level. Generate NO consts; validator data only.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/attr" }
+    },
+    "attr": {
+      "type": "object",
+      "required": ["type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "JSON value type the attribute is encoded as.",
+          "enum": ["string", "integer", "number", "boolean", "array", "object"]
+        },
+        "required": { "type": "boolean" }
       }
     },
     "array": {

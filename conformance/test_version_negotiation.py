@@ -34,9 +34,15 @@ import zarr_spectral_schema as zss  # noqa: E402
 @pytest.fixture(scope="module")
 def stores(tmp_path_factory) -> Path:
     out = tmp_path_factory.mktemp("ver_stores")
-    generate.emit(out / "equal.zarr")  # spec-current: l0=2, cal=1.3
+    # The negotiation fixtures are structurally-valid stores with one on-disk
+    # version overridden, so the only thing under test is the range check. The
+    # cal_schema_version fixtures ride an L1 single-frontend store; the integer
+    # (l0_schema_version) fixture rides an L0 store.
+    generate.emit_l1_single(out / "equal.zarr")  # spec-current: cal=1.3
     for name, versions in generate.VERSION_FIXTURES.items():
         generate.emit(out / name, versions=versions)
+    for name, versions in generate.L0_VERSION_FIXTURES.items():
+        generate.emit_l0(out / name, versions=versions)
     return out
 
 
@@ -88,11 +94,15 @@ def test_below_floor_errors(stores):
 
 def test_package_version_independent_of_on_disk(stores):
     spec = zss.load_spec()
-    # spec_version is off-disk provenance: never written into the store.
-    view = zss._store.read_store(stores / "equal.zarr")  # type: ignore[attr-defined]
-    assert "l0_schema_version" in view.root_attrs
-    assert "cal_schema_version" in view.root_attrs
-    assert "spec_version" not in view.root_attrs
+    # spec_version is off-disk provenance: never written into a store. The L1
+    # store carries only cal_schema_version, the L0 store only l0_schema_version
+    # (each level's `detect` attr) — neither carries spec_version.
+    l1 = zss._store.read_store(stores / "equal.zarr")  # type: ignore[attr-defined]
+    assert "cal_schema_version" in l1.root_attrs
+    assert "spec_version" not in l1.root_attrs
+    l0 = zss._store.read_store(stores / "ver_l0_newer_major.zarr")  # type: ignore[attr-defined]
+    assert "l0_schema_version" in l0.root_attrs
+    assert "spec_version" not in l0.root_attrs
     # ...and its value is decoupled from the on-disk version values.
     assert spec["spec_version"] not in {"2", "1.3"}
     assert spec["spec_version"] != spec["versions"]["l0_schema_version"]["value"]
