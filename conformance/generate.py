@@ -32,6 +32,10 @@ SPEC = Path(__file__).resolve().parent.parent / "spec" / "schema.yaml"
 # The scan group the fixtures wrap their content in (writer pads to 6 digits).
 _SCAN = "scan_000001"
 
+# The additive L0 identity/provenance scan attrs introduced in #13. A pre-#6
+# store is modelled by omitting exactly these (they are all `required: false`).
+_IDENTITY_L0_ATTRS = {"frontend", "pixels_per_array", "raw_attrs"}
+
 
 def load_spec() -> dict:
     return yaml.safe_load(SPEC.read_text(encoding="utf-8"))
@@ -63,15 +67,28 @@ def _sample_attr(aspec: dict, name: str):
     raise ValueError(f"unhandled attr type {t!r} for {name!r}")
 
 
-def _write_attrs(group, declared: dict, omit_attrs: set[str], emit_optional: bool) -> None:
+def _write_attrs(
+    group,
+    declared: dict,
+    omit_attrs: set[str],
+    emit_optional: bool,
+    overrides: dict | None = None,
+) -> None:
     """Write declared attrs onto ``group``.
 
     Required attrs are always emitted (a structurally-valid store needs them);
     optional attrs are emitted only when ``emit_optional`` (so the fixtures carry
     a realistic subset). ``omit_attrs`` drops specific attrs for negative stores.
+    ``overrides`` substitutes a literal on-disk value for a named attr (forcing it
+    to be written even when optional) — used to emit wrong-typed negatives whose
+    value deliberately violates the declared ``type``.
     """
+    overrides = overrides or {}
     for name, aspec in declared.items():
         if name in omit_attrs:
+            continue
+        if name in overrides:
+            group.attrs[name] = overrides[name]
             continue
         if not aspec.get("required", False) and not emit_optional:
             continue
@@ -125,11 +142,14 @@ def emit_l0(
     omit: set[str] | None = None,
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
+    scan_attr_overrides: dict | None = None,
 ) -> Path:
     """Emit an L0 store: scan_000001/{source,calibration}/<arrays> + attrs.
 
     ``versions`` overrides the on-disk ``l0_schema_version`` (integer axis) for
     the version-negotiation fixtures while the structure stays spec-current.
+    ``scan_attr_overrides`` substitutes literal scan-group attr values (for the
+    wrong-typed identity-contract negatives, e.g. ``raw_attrs`` as a string).
     """
     omit = omit or set()
     omit_attrs = omit_attrs or set()
@@ -141,7 +161,13 @@ def emit_l0(
     _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
 
     scan = root.require_group(_SCAN)
-    _write_attrs(scan, level.get("scan_attrs", {}), omit_attrs, emit_optional=True)
+    _write_attrs(
+        scan,
+        level.get("scan_attrs", {}),
+        omit_attrs,
+        emit_optional=True,
+        overrides=scan_attr_overrides,
+    )
 
     # L0 has two `placement: scan, inline: false` sub-groups (source/calibration).
     for gname, gspec in level.get("groups", {}).items():
@@ -303,6 +329,22 @@ def main() -> None:
     emit_l1_multi(out / "miss_band_index.zarr", omit_band_attrs={1: {"band_index"}})
     print(f"emitted: {out/'miss_array.zarr'}")
     print(f"emitted: {out/'miss_band_index.zarr'}")
+
+    # Identity + provenance contract (#13). The post-#6 store (l0.zarr above)
+    # carries the new optional L0 identity attrs; a pre-#6 store omits them and
+    # must still validate green (the fields are optional); wrong-typed values are
+    # rejected — `raw_attrs` as a string (declared object) and the legacy dict
+    # form of `pixels_per_array` (declared list-of-lists ⇒ JSON array), which the
+    # spec deliberately does NOT admit.
+    emit_l0(out / "l0_pre6.zarr", omit_attrs=_IDENTITY_L0_ATTRS)
+    emit_l0(out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": "not-an-object"})
+    emit_l0(
+        out / "l0_bad_pixels_per_array.zarr",
+        scan_attr_overrides={"pixels_per_array": {"HFA": ["P1", "P2"]}},
+    )
+    print(f"emitted: {out/'l0_pre6.zarr'}")
+    print(f"emitted: {out/'l0_bad_raw_attrs.zarr'}")
+    print(f"emitted: {out/'l0_bad_pixels_per_array.zarr'}")
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.

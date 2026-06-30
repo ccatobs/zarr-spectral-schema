@@ -45,6 +45,24 @@ def test_real_spec_passes_meta_schema():
             id="bad-on_disk",
         ),
         pytest.param(lambda s: s.__setitem__("spec_version", "1.x"), id="bad-spec_version"),
+        # The top level stays strict (additionalProperties: false): an unknown key
+        # is still rejected even after precedence_aliases was admitted.
+        pytest.param(
+            lambda s: s.__setitem__("bogus_top_level", {}), id="unknown-top-level-key"
+        ),
+        # precedence_aliases has teeth: an entry must carry a `from` list of strings.
+        pytest.param(
+            lambda s: s["precedence_aliases"]["pixel_offset"].pop("from"),
+            id="precedence-alias-missing-from",
+        ),
+        pytest.param(
+            lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("from", "PIXOFFX"),
+            id="precedence-alias-from-not-array",
+        ),
+        pytest.param(
+            lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("bogus", 1),
+            id="precedence-alias-extra-key",
+        ),
     ],
 )
 def test_malformed_spec_is_rejected(mutate):
