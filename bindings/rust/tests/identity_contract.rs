@@ -64,12 +64,14 @@ fn pre6_l0_is_green() {
 
 #[test]
 fn raw_attrs_must_be_object() {
+    // Assert the type phrase (the bad value is `42`, which has no "object"
+    // substring) so this proves a type-error rejection, not "an error names it".
     let f = emit_fixtures();
     let problems = zss::validate(&f.join("l0_bad_raw_attrs.zarr"));
     assert!(
         problems
             .iter()
-            .any(|p| p.contains("raw_attrs") && p.contains("object")),
+            .any(|p| p.contains("raw_attrs") && p.contains("must be of type") && p.contains("object")),
         "expected raw_attrs type rejection, got: {problems:?}"
     );
 }
@@ -78,21 +80,48 @@ fn raw_attrs_must_be_object() {
 fn pixels_per_array_dict_form_is_rejected() {
     // The legacy HashMap/dict form must NOT validate: `type: array` rejects a
     // JSON object, so the non-deterministic dict representation cannot be lifted.
+    // Assert the type phrase — "array" alone is a substring of the attribute
+    // name pixels_per_array, so it would pass vacuously.
     let f = emit_fixtures();
     let problems = zss::validate(&f.join("l0_bad_pixels_per_array.zarr"));
     assert!(
         problems
             .iter()
-            .any(|p| p.contains("pixels_per_array") && p.contains("array")),
+            .any(|p| p.contains("pixels_per_array") && p.contains("must be of type") && p.contains("array")),
         "expected pixels_per_array type rejection, got: {problems:?}"
     );
 }
 
-// ── L1: frontend promoted to scan-or-band placement — both shapes green ──────
+// ── L1: frontend promoted to scan-or-band placement ─────────────────────────
+
+/// Read one group node's `attributes` map (parity with the Python store reader).
+fn group_attrs(store: &std::path::Path, rel: &str) -> serde_json::Map<String, serde_json::Value> {
+    let text = std::fs::read_to_string(store.join(rel).join("zarr.json")).expect("read zarr.json");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("parse zarr.json");
+    v.get("attributes")
+        .and_then(|a| a.as_object())
+        .cloned()
+        .unwrap_or_default()
+}
 
 #[test]
 fn l1_frontend_scan_or_band_is_green() {
     let f = emit_fixtures();
     assert!(zss::validate(&f.join("l1_single.zarr")).is_empty());
     assert!(zss::validate(&f.join("l1_multi.zarr")).is_empty());
+}
+
+#[test]
+fn l1_frontend_placement_matches_python() {
+    // On-disk placement parity with the Python test: frontend sits at the scan
+    // group for single-frontend, and on each band (not the scan group) for multi.
+    let f = emit_fixtures();
+
+    let single = f.join("l1_single.zarr");
+    assert!(group_attrs(&single, "scan_000001").contains_key("frontend"));
+
+    let multi = f.join("l1_multi.zarr");
+    assert!(!group_attrs(&multi, "scan_000001").contains_key("frontend"));
+    assert!(group_attrs(&multi, "scan_000001/band_0").contains_key("frontend"));
+    assert!(group_attrs(&multi, "scan_000001/band_1").contains_key("frontend"));
 }

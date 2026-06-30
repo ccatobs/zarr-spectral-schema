@@ -40,10 +40,10 @@ def stores(tmp_path_factory) -> Path:
     generate.emit_l0(out / "l0_post6.zarr")
     # Pre-#6: the same store without the new optional identity attrs.
     generate.emit_l0(out / "l0_pre6.zarr", omit_attrs=set(generate._IDENTITY_L0_ATTRS))
-    # Wrong-typed negatives.
-    generate.emit_l0(
-        out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": "not-an-object"}
-    )
+    # Wrong-typed negatives. The raw_attrs bad value is `42` (no "object"
+    # substring) so the assertion can only pass if the validator names the
+    # expected type, not because the value text happened to contain it.
+    generate.emit_l0(out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
     generate.emit_l0(
         out / "l0_bad_pixels.zarr",
         scan_attr_overrides={"pixels_per_array": {"HFA": ["P1", "P2"]}},
@@ -90,15 +90,19 @@ def test_pre6_l0_validates_green(stores):
 
 
 def test_raw_attrs_must_be_object(stores):
+    # Assert the type phrase (not just "object", which would match the value
+    # text) so this proves a type-error rejection, not merely "an error names it".
     errors = zss.validate(stores / "l0_bad_raw_attrs.zarr")
-    assert any("raw_attrs" in e and "object" in e for e in errors), errors
+    assert any("raw_attrs" in e and "must be of type 'object'" in e for e in errors), errors
 
 
 def test_pixels_per_array_dict_form_is_rejected(stores):
     # The legacy HashMap/dict representation must NOT validate: `type: array`
     # rejects a JSON object, so the non-deterministic dict cannot be lifted.
+    # Assert the type phrase — "array" alone is a substring of the attribute
+    # name pixels_per_array, so it would pass vacuously.
     errors = zss.validate(stores / "l0_bad_pixels.zarr")
-    assert any("pixels_per_array" in e and "array" in e for e in errors), errors
+    assert any("pixels_per_array" in e and "must be of type 'array'" in e for e in errors), errors
 
 
 # ── L1: frontend promoted to scan-or-band placement ────────────────────────────

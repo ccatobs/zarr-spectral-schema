@@ -330,14 +330,16 @@ def main() -> None:
     print(f"emitted: {out/'miss_array.zarr'}")
     print(f"emitted: {out/'miss_band_index.zarr'}")
 
-    # Identity + provenance contract (#13). The post-#6 store (l0.zarr above)
-    # carries the new optional L0 identity attrs; a pre-#6 store omits them and
-    # must still validate green (the fields are optional); wrong-typed values are
-    # rejected — `raw_attrs` as a string (declared object) and the legacy dict
-    # form of `pixels_per_array` (declared list-of-lists ⇒ JSON array), which the
-    # spec deliberately does NOT admit.
+    # Identity + provenance contract. The post-store (l0.zarr above) carries the
+    # new optional L0 identity attrs; a pre-store omits them and must still
+    # validate green (the fields are optional); wrong-typed values are rejected —
+    # `raw_attrs` as a scalar (declared object) and the legacy dict form of
+    # `pixels_per_array` (declared list-of-lists ⇒ JSON array), which the spec
+    # deliberately does NOT admit. The raw_attrs bad value is `42` (no "object"
+    # substring) so the negative proves a type-error rejection, not that the value
+    # text happened to name the type.
     emit_l0(out / "l0_pre6.zarr", omit_attrs=_IDENTITY_L0_ATTRS)
-    emit_l0(out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": "not-an-object"})
+    emit_l0(out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
     emit_l0(
         out / "l0_bad_pixels_per_array.zarr",
         scan_attr_overrides={"pixels_per_array": {"HFA": ["P1", "P2"]}},

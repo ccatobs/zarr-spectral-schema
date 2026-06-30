@@ -60,6 +60,10 @@ def test_real_spec_passes_meta_schema():
             id="precedence-alias-from-not-array",
         ),
         pytest.param(
+            lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("from", []),
+            id="precedence-alias-from-empty",
+        ),
+        pytest.param(
             lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("bogus", 1),
             id="precedence-alias-extra-key",
         ),
