@@ -85,6 +85,35 @@ levels:
       mission_id:          { type: string,  required: false }
       obs_id:              { type: string,  required: false }
       aor_id:              { type: string,  required: false }
+      # ── Identity + provenance (additive; the L0 writer starts emitting these
+      # in a later slice, so all required:false — pre-#6 stores still validate).
+      # The law (ADR-0007): identity is producer-written and forwarded, never
+      # re-derived. `frontend` is written here at L0 and forwarded L0→L1 (retiring
+      # the fragile longest-common-prefix re-derivation).
+      frontend:         { type: string, required: false }
+      # Per-array pixel layout, canonical = a LIST OF LISTS positionally aligned
+      # with the scan's `arrays` order (identical L0/L1). Declared `type: array`
+      # ONLY: the legacy HashMap/dict representation (nondeterministic key order)
+      # is deliberately NOT admitted — a JSON object fails `type: array`, so the
+      # dict form cannot be lifted. The generic validator type-checks the outer
+      # array; the inner per-array string lists are writer-enforced.
+      pixels_per_array: { type: array, required: false }
+      # Verbatim source-keyword provenance for the resolved identity/geometry, so
+      # offsets are auditable and re-derivable. ONE optional object-typed group
+      # attr; the generic validator type-checks the top-level object only — the
+      # nested shape below is writer-enforced (+ writer-side conformance CI),
+      # backed by the verbatim `raw_fits_headers [S]` full-header array:
+      #   - per-subscan rotating terms:   POSANGLE, ANGLEDIFF, COSYDEL
+      #   - per-pixel/array static geometry: RXDX/RXDY, REFRXDX/REFRXDY,
+      #                                      SIGNRXDX/SIGNRXDY
+      #   - per-scan:                     FITSVERS
+      #   - pixel_offset resolution method marker: direct (PIXOFFX) vs
+      #     reconstructed (FITSVERS-gated RXDX→sky-frame rotation — a first-class
+      #     derived datum, not a fallback; retiring it would silently collapse
+      #     pre-2.12 upGREAT footprints onto the boresight)
+      #   - substitution markers: mjd (computed from DATE-OBS vs keyword),
+      #     tsky (tamb-substituted vs keyword)
+      raw_attrs:        { type: object, required: false }
     groups:
       source:                   # → const SOURCE_GROUP
         # L0 obs sub-group: arrays under scan_<N>/source/ (inline:false).
@@ -198,20 +227,24 @@ levels:
       date_obs:             { type: string,  required: false }
       telescope:            { type: string,  required: false }
     # Per-band-group attrs (multi-frontend only; calibrated.rs:317-341). band_index,
-    # line, rest_freq_hz, arrays, pixels_per_array are unconditional on each band;
-    # `frontend` is guarded by `if !arrays.is_empty()` → required:false.
+    # arrays, pixels_per_array are unconditional on each band. (`frontend` was a
+    # band attr; it is now a scan_or_band attr so single-frontend stores carry it
+    # at the scan group too — identity is forwarded everywhere, not band-only.)
     band_attrs:
       band_index:       { type: integer, required: true }
       arrays:           { type: array,   required: true }
       pixels_per_array: { type: array,   required: true }
-      frontend:         { type: string,  required: false }
     # Attrs that sit at the scan group when single-frontend and at each band group
     # when multi-frontend (line/rest_freq_hz: calibrated.rs:255-264 vs 322-327).
     # l1_complete is written last as the completeness marker (calibrated.rs:544-549).
+    # `frontend` (L0-forwarded identity) is checked at the scan group for a
+    # single-frontend store and at each band for multi-frontend; required:false
+    # (guarded by `if !arrays.is_empty()` on the writer side).
     scan_or_band_attrs:
       line:         { type: string,  required: true }
       rest_freq_hz: { type: number,  required: true }
       l1_complete:  { type: boolean, required: true }
+      frontend:     { type: string,  required: false }
     groups:
       # The L1 main arrays sit directly under the scan group (single-frontend) or
       # each band sub-group (multi-frontend) — placement scan_or_band, inline:true
@@ -272,12 +305,22 @@ lists:
 markers:
   L1_COMPLETE_ATTR: l1_complete   # written last on an L1 scan/band group; absence ⇒ untrusted
 
+# Validator-only spec data (generates NO Rust const): for each canonical
+# attribute, the ordered list of source FITS keywords it may be resolved from,
+# highest precedence first. Documents resolution provenance — that `pixel_offset`
+# comes from PIXOFFX (direct, ≥2.12) else RXDX (FITSVERS-gated sky-frame
+# reconstruction). The generic validator does NOT enforce precedence; the L0
+# producer applies the deterministic, profile-selected strategy and records the
+# method + inputs in `raw_attrs`.
+precedence_aliases:
+  pixel_offset: { from: [PIXOFFX, RXDX] }
+
 # ── RESERVED (ADR-0008) — activated in later slices ──
 #
 # placement:                    # #5 — ARBITRARY archive nesting + the scan-or-band rule
 #   hierarchy: [flight, scan, band]      # real L0 today: scan_{N}/{source|calibration}/data_5d
 #
-# attrs:                        # #6 identity + #7 science self-description.
+# attrs:                        # #7 science self-description.
 #   # DECISION (signed off 2026-06-16): `index` marks ATTRIBUTES ONLY (the discovery
 #   # surface a catalog filters on). Array-valued quantities (e.g. signal_freq) are
 #   # cataloged via PRODUCER-written summary attrs (signal_freq_min/max) — extract once,
@@ -285,5 +328,3 @@ markers:
 #   frontend:        { level: L0, required: true, index: true }
 #   source:          { level: L0, required: true, index: true }
 #   signal_freq_min: { level: L0, required: true, index: true }   # summary of the signal_freq ARRAY
-#
-# precedence_aliases:           # #5/#6: { pixel_offset: { from: [PIXOFFX, RXDX] } }
