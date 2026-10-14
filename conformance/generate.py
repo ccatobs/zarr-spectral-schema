@@ -527,6 +527,16 @@ def emit_storage_fixtures(out: Path) -> None:
         out / "l1_bad_valid_dumps.zarr",
         array_overrides={f"{_SCAN}/n_valid_dumps": bad},
     )
+    # The local walk does not follow a symlinked directory: scan_000002 links
+    # to a scan without spectra, and the store stays green.
+    emit_l1_single(out / "l1_symlink_target.zarr", omit={f"{_SCAN}/spectra"})
+    store = emit_l1_single(out / "l1_symlinked_scan.zarr")
+    (store / "scan_000002").symlink_to(
+        Path("..") / "l1_symlink_target.zarr" / _SCAN, target_is_directory=True
+    )
+    # A local path is a path: `::` and `name:` in it are not URL syntax.
+    emit_l1_single(out / "colon_dir" / "miss_array.zarr", omit={f"{_SCAN}/spectra"})
+    (out / "colon_dir").rename(out / "a::b")
     # source_l0_store holds an RFC 3986 URI reference, never an absolute path.
     for name, (value, _ok) in SOURCE_L0_STORE_FIXTURES.items():
         emit_l1_single(out / name, scan_attr_overrides={"source_l0_store": value})

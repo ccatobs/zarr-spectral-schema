@@ -5,11 +5,16 @@ the validation path. It reads ``zarr.json`` metadata directly (no zarr library
 dependency) so the Rust and Python readers produce the same normalized shape and
 the generic interpreter on top of it cannot diverge between languages.
 
-Object storage (#20): the store is a local path or any URL fsspec opens
-(``s3://bucket/store.zarr`` with s3fs installed). The walk reads only
-``zarr.json`` objects: it lists the children of each group node and stops at an
-array node, so it never lists or opens a chunk key. A directory without a
-``zarr.json`` is not a node, and the walk does not enter it.
+Object storage (#20). One input grammar in both bindings: an argument that
+starts with ``scheme://`` is a URL, opened through fsspec
+(``s3://bucket/store.zarr`` with s3fs installed), and its path is
+percent-decoded. Anything else is a local path, taken as it is. The walk reads
+only ``zarr.json`` objects: it lists the children of each group node and stops
+at an array node, so it never lists or opens a chunk key. A directory without a
+``zarr.json`` is not a node, and the local walk does not follow a symlinked
+directory. An I/O failure is an error of its own, never a gap and never an
+exception: a failed listing is ``'<rel>/': cannot list``, a failed read of a
+``zarr.json`` is ``'<rel>': cannot read metadata``.
 
 Parse rule (both bindings, stated in the spec): metadata is strict JSON. A
 non-finite number (``NaN``, ``Infinity``, ``-Infinity``) is its own error; any
@@ -21,9 +26,11 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import fsspec
 
@@ -53,13 +60,22 @@ class _NonFinite(Exception):
     pass
 
 
+_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+
+
 def read_store(store_path: str | Path) -> StoreView:
     """Walk a Zarr v3 store and normalize every node keyed by relative path.
 
     ``store_path`` is a local path or a URL (``s3://bucket/store.zarr``).
     Raises ``ValueError`` only when the root is not a readable Zarr v3 group.
     """
-    fs, root = fsspec.core.url_to_fs(str(store_path))
+    store = str(store_path)
+    if _URL_RE.match(store):
+        # A fresh instance per check: no stale listing, no stale endpoint.
+        fs, root = fsspec.core.url_to_fs(store, skip_instance_cache=True, use_listings_cache=False)
+        root = unquote(root)
+    else:
+        fs, root = fsspec.filesystem("file"), store
     root = root.rstrip("/")
     root_errors: list[str] = []
     root_meta = _read_node(fs, f"{root}/zarr.json", "zarr.json", root_errors)
@@ -69,22 +85,27 @@ def read_store(store_path: str | Path) -> StoreView:
         raise ValueError(f"{store_path}: not a Zarr v3 group (missing/!group root zarr.json)")
 
     view = StoreView(root_attrs=_attributes(root_meta))
-    _walk(fs, root, "", view)
+    _walk(fs, root, "", view)  # a root that cannot be listed raises ValueError
     return view
 
 
 def _walk(fs, root: str, rel: str, view: StoreView) -> None:
     """Record each child node of the group at ``rel``; recurse into child groups.
 
+    Raises ``ValueError`` when the group at ``rel`` cannot be listed; a child
+    group that cannot be listed is an error in ``view.errors``.
+
     # ponytail: one request at a time; fetch siblings concurrently if a large
     # store on object storage makes the walk slow.
     """
     try:
         entries = fs.ls(f"{root}/{rel}" if rel else root, detail=True)
-    except OSError:
-        return
+    except Exception:  # noqa: BLE001 - any filesystem failure; botocore errors are not OSError
+        raise ValueError(f"'{rel}/': cannot list") from None
     names = sorted(
-        e["name"].rstrip("/").rsplit("/", 1)[-1] for e in entries if e["type"] == "directory"
+        e["name"].rstrip("/").rsplit("/", 1)[-1]
+        for e in entries
+        if e["type"] == "directory" and not e.get("islink")
     )
     for name in names:
         child = f"{rel}/{name}" if rel else name
@@ -100,18 +121,21 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
             )
         elif meta.get("node_type") == "group":
             view.group_attrs[child] = _attributes(meta)
-            _walk(fs, root, child, view)
+            try:
+                _walk(fs, root, child, view)
+            except ValueError as e:
+                view.errors.append(str(e))
 
 
 def _read_node(fs, path: str, rel: str, errors: list[str]) -> dict[str, Any] | None:
     """Parse one ``zarr.json``; ``None`` when absent; on failure append the error naming ``rel``."""
     try:
-        # start=0 sends one ranged GET; without it s3fs sends a HEAD first.
-        raw = fs.cat_file(path, start=0)
+        raw = fs.cat_file(path)
     except FileNotFoundError:
         return None
-    except OSError:
-        raw = b""
+    except Exception:  # noqa: BLE001 - any filesystem failure; botocore errors are not OSError
+        errors.append(f"'{rel}': cannot read metadata")
+        return None
     try:
         meta = json.loads(
             raw.decode("utf-8"),
@@ -123,7 +147,7 @@ def _read_node(fs, path: str, rel: str, errors: list[str]) -> dict[str, Any] | N
         return None
     # JSONDecodeError and UnicodeDecodeError are ValueErrors; RecursionError is
     # metadata nested past the parser's depth (serde_json stops at 128 levels).
-    except (ValueError, OSError, RecursionError):
+    except (ValueError, RecursionError):
         meta = None
     if not isinstance(meta, dict):
         errors.append(f"'{rel}': malformed metadata (not valid JSON)")

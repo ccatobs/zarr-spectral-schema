@@ -1,19 +1,24 @@
 """An in-process S3 endpoint (moto) for the object-storage tests of both bindings.
 
 The server records every request it serves, so a test can prove which objects a
-validator read: :meth:`S3Server.offending` names each request that lists or
-opens anything but a ``zarr.json`` object, or lists below an array node (the
-prefix that holds its chunk keys).
+validator read: :meth:`S3Server.offending` names each request that opens
+anything but a ``zarr.json`` object, lists without the ``/`` delimiter, or lists
+below an array node (the prefix that holds its chunk keys). The server answers
+403 (AccessDenied) for each object key or listing prefix in ``deny``.
 
 Python tests import :class:`S3Server`. The Rust tests run this file:
 
-    python conformance/s3_server.py <store_dir>...
+    python conformance/s3_server.py [<name>=]<store_dir>...
 
-It uploads each store under its directory name into bucket ``zss``, prints the
-endpoint URL and its AWS environment (:func:`env`) as one JSON line on stdout
-and serves until stdin closes. Each
-stdin line ``requests`` prints one JSON line: the requests served since the
-previous line, and the offending ones among them.
+It uploads each store under ``<name>`` (default: its directory name) into bucket
+``zss``, prints the endpoint URL and its AWS environment (:func:`env`) as one
+JSON line on stdout and serves until stdin closes. It answers each stdin line
+with one JSON line:
+
+- ``requests``: the requests served since the previous ``requests`` line, and
+  the offending ones among them;
+- ``deny <key or prefix>``: answer 403 for it from now on;
+- ``allow``: clear the deny list.
 
 Clients take the endpoint from the standard AWS environment (:func:`env`).
 """
@@ -58,16 +63,24 @@ class S3Server:
     def __init__(self) -> None:
         self.requests: list[list[str]] = []
         self.arrays: set[str] = set()  # key prefixes of array nodes
+        self.deny: set[str] = (
+            set()
+        )  # object keys and listing prefixes answered with 403
         backend = DomainDispatcherApplication(create_backend_app)
 
         def app(environ, start_response):
-            self.requests.append(
-                [
-                    environ["REQUEST_METHOD"],
-                    environ["PATH_INFO"],
-                    environ["QUERY_STRING"],
+            request = [
+                environ["REQUEST_METHOD"],
+                environ["PATH_INFO"],
+                environ["QUERY_STRING"],
+            ]
+            self.requests.append(request)
+            key, params = _parse(request)
+            if (key or params.get("prefix", [""])[0]) in self.deny:
+                start_response("403 Forbidden", [("Content-Type", "application/xml")])
+                return [
+                    b"<Error><Code>AccessDenied</Code><Message>denied</Message></Error>"
                 ]
-            )
             return backend(environ, start_response)
 
         logging.getLogger("werkzeug").setLevel(logging.ERROR)  # no line per request
@@ -99,42 +112,61 @@ class S3Server:
         self.requests.clear()
         return f"s3://{BUCKET}/{name}"
 
+    def put(self, key: str, body: bytes) -> None:
+        """Write one object (e.g. a node added after a first check)."""
+        self._s3.put_object(Bucket=BUCKET, Key=key, Body=body)
+
     def take_requests(self) -> list[list[str]]:
         """The requests served since the previous call."""
         taken, self.requests = self.requests, []
         return taken
 
     def offending(self, requests: list[list[str]]) -> list[list[str]]:
-        """Requests that read anything but a zarr.json object or list below an array node."""
+        """Requests that read anything but a zarr.json object, or that list
+        without the "/" delimiter or below an array node (chunk keys)."""
         bad = []
-        for method, path, query in requests:
-            key = path.removeprefix(f"/{BUCKET}").removeprefix("/")
-            prefix = parse_qs(query).get("prefix", [""])[0]
+        for request in requests:
+            key, params = _parse(request)
+            prefix = params.get("prefix", [""])[0]
             if key and not (key == "zarr.json" or key.endswith("/zarr.json")):
-                bad.append([method, path, query])  # an object other than zarr.json
+                bad.append(request)  # an object other than zarr.json
+            elif not key and params.get("delimiter") != ["/"]:
+                bad.append(request)  # a recursive listing reaches chunk keys
             elif any((prefix + "/").startswith(a) for a in self.arrays):
-                bad.append([method, path, query])  # a listing of chunk keys
+                bad.append(request)  # a listing of chunk keys
         return bad
 
     def stop(self) -> None:
         self._server.shutdown()
 
 
+def _parse(request: list[str]) -> tuple[str, dict[str, list[str]]]:
+    """The object key (empty for a bucket request) and the query parameters."""
+    _, path, query = request
+    return path.removeprefix(f"/{BUCKET}").removeprefix("/"), parse_qs(query)
+
+
 def main(stores: list[str]) -> None:
     server = S3Server()
-    for store in stores:
-        server.upload(Path(store))
+    for arg in stores:
+        name, _, store = arg.rpartition("=")
+        server.upload(Path(store), name or None)
     print(
         json.dumps({"endpoint": server.endpoint, "env": env(server.endpoint)}),
         flush=True,
     )
     for line in sys.stdin:
-        if line.strip() == "requests":
+        command, _, arg = line.strip().partition(" ")
+        if command == "requests":
             served = server.take_requests()
-            print(
-                json.dumps({"served": served, "offending": server.offending(served)}),
-                flush=True,
-            )
+            answer = {"served": served, "offending": server.offending(served)}
+        elif command == "deny":
+            server.deny.add(arg)
+            answer = {"deny": sorted(server.deny)}
+        else:  # allow
+            server.deny.clear()
+            answer = {"deny": []}
+        print(json.dumps(answer), flush=True)
     server.stop()
 
 

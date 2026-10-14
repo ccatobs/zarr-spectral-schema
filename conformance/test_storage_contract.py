@@ -107,3 +107,33 @@ def test_source_l0_store_is_a_uri_reference(stores, name):
         assert any("source_l0_store" in e and "URI reference" in e for e in errors), (
             errors
         )
+
+
+# ── 6. one local walk, one input grammar ───────────────────────────────────
+
+
+def test_symlinked_scan_is_not_followed(stores):
+    # scan_000002 links to a scan without spectra; the walk does not enter it.
+    assert (stores / "l1_symlinked_scan.zarr" / "scan_000002").is_symlink()
+    assert zss.validate(stores / "l1_symlinked_scan.zarr") == []
+
+
+def test_local_path_with_double_colon_is_that_path(stores):
+    errors = zss.validate(stores / "a::b" / "miss_array.zarr")
+    assert errors == ["[L1] required array 'scan_000001/spectra' is missing"]
+
+
+def test_unlistable_local_group_is_an_error(tmp_path):
+    store = generate.emit_l1_single(
+        tmp_path / "l1_bad_skydiff.zarr",
+        array_overrides={
+            "scan_000001/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}
+        },
+    )
+    skydiff = store / "scan_000001" / "skydiff"
+    skydiff.chmod(0o311)  # no read: the directory cannot be listed
+    try:
+        errors = zss.validate(store)
+    finally:
+        skydiff.chmod(0o755)
+    assert errors == ["[L1] 'scan_000001/skydiff/': cannot list"]
