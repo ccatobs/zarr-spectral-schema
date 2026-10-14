@@ -113,3 +113,11 @@ fn l0_complete_marker_is_checked() {
         );
     }
 }
+
+#[test]
+fn skydiff_family_member_dtype_and_ndim_are_checked() {
+    let e = errors("l1_bad_skydiff.zarr");
+    let rel = "scan_000001/skydiff/spectrum_0";
+    assert!(e.iter().any(|m| m.contains(rel) && m.contains("dtype")), "expected a dtype error, got: {e:?}");
+    assert!(e.iter().any(|m| m.contains(rel) && m.contains("ndim")), "expected an ndim error, got: {e:?}");
+}

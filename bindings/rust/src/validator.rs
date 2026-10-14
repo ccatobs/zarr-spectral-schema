@@ -95,6 +95,9 @@ struct ArraySpec {
     dtype: String,
     ndim: usize,
     required: bool,
+    /// Array family: matches every array whose name starts with this prefix.
+    #[serde(default)]
+    prefix: Option<String>,
 }
 
 /// Outcome of validating a store: hard `errors` and advisory `warnings`.
@@ -271,7 +274,8 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
 ///
 /// `inline` groups place arrays directly in `base`; otherwise they sit under
 /// `base/<group_name>/`. Required arrays must exist (dtype + ndim checked);
-/// optional arrays are checked only when present.
+/// optional arrays are checked only when present. An array family (`prefix`)
+/// checks every array whose name starts with the prefix.
 fn check_group_arrays(
     view: &StoreView,
     base: &str,
@@ -286,27 +290,54 @@ fn check_group_arrays(
         format!("{base}/{group_name}")
     };
     for (array_name, aspec) in &group.arrays {
-        let rel = format!("{prefix}/{array_name}");
-        let Some((dtype, ndim)) = view.arrays.get(&rel) else {
-            if aspec.required {
-                result
-                    .errors
-                    .push(format!("[{level_name}] required array '{rel}' is missing"));
-            }
+        let Some(family) = &aspec.prefix else {
+            check_array(view, &format!("{prefix}/{array_name}"), aspec, level_name, result);
             continue;
         };
-        if *dtype != aspec.dtype {
-            result.errors.push(format!(
-                "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
-                aspec.dtype
-            ));
+        let start = format!("{prefix}/{family}");
+        let members: Vec<&String> = view
+            .arrays
+            .keys()
+            .filter(|r| r.starts_with(&start) && !r[prefix.len() + 1..].contains('/'))
+            .collect();
+        if members.is_empty() && aspec.required {
+            result
+                .errors
+                .push(format!("[{level_name}] required array family '{start}*' is missing"));
         }
-        if *ndim != aspec.ndim {
-            result.errors.push(format!(
-                "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
-                aspec.ndim
-            ));
+        for rel in members {
+            check_array(view, rel, aspec, level_name, result);
         }
+    }
+}
+
+/// Check one array path: presence (if required), dtype and ndim.
+fn check_array(
+    view: &StoreView,
+    rel: &str,
+    aspec: &ArraySpec,
+    level_name: &str,
+    result: &mut ValidationResult,
+) {
+    let Some((dtype, ndim)) = view.arrays.get(rel) else {
+        if aspec.required {
+            result
+                .errors
+                .push(format!("[{level_name}] required array '{rel}' is missing"));
+        }
+        return;
+    };
+    if *dtype != aspec.dtype {
+        result.errors.push(format!(
+            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
+            aspec.dtype
+        ));
+    }
+    if *ndim != aspec.ndim {
+        result.errors.push(format!(
+            "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
+            aspec.ndim
+        ));
     }
 }
 

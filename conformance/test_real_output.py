@@ -95,3 +95,10 @@ def test_l0_complete_marker_true_is_green(stores):
     view = zss._store.read_store(stores / "l0.zarr")  # type: ignore[attr-defined]
     assert view.group_attrs["scan_000001"]["l0_complete"] is True
     assert zss.L0_COMPLETE_ATTR == "l0_complete"
+
+
+def test_skydiff_family_member_dtype_and_ndim_are_checked(stores):
+    errors = zss.validate(stores / "l1_bad_skydiff.zarr")
+    rel = "scan_000001/skydiff/spectrum_0"
+    assert any(rel in e and "dtype" in e for e in errors), errors
+    assert any(rel in e and "ndim" in e for e in errors), errors

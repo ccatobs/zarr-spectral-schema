@@ -217,29 +217,43 @@ def _check_group_arrays(
 
     ``inline`` groups place arrays directly in ``base``; otherwise they sit under
     ``base/<group_name>/``. Required arrays must exist (dtype + ndim checked);
-    optional arrays are checked only when present.
+    optional arrays are checked only when present. An array family (``prefix``)
+    checks every array whose name starts with the prefix.
     """
     inline = group.get("inline", False)
     prefix = base if inline else f"{base}/{group_name}"
     for array_name, aspec in group.get("arrays", {}).items():
-        rel = f"{prefix}/{array_name}"
-        arr = view.arrays.get(rel)
-        if arr is None:
-            if aspec.get("required", False):
-                result.errors.append(
-                    f"[{level_name}] required array '{rel}' is missing"
-                )
+        if "prefix" not in aspec:
+            _check_array(view, f"{prefix}/{array_name}", aspec, level_name, result)
             continue
-        if arr.dtype != aspec["dtype"]:
-            result.errors.append(
-                f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected "
-                f"{aspec['dtype']!r}"
-            )
-        if arr.ndim != aspec["ndim"]:
-            result.errors.append(
-                f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected "
-                f"{aspec['ndim']}"
-            )
+        start = f"{prefix}/{aspec['prefix']}"
+        members = sorted(
+            r for r in view.arrays if r.startswith(start) and "/" not in r[len(prefix) + 1 :]
+        )
+        if not members and aspec.get("required", False):
+            result.errors.append(f"[{level_name}] required array family '{start}*' is missing")
+        for rel in members:
+            _check_array(view, rel, aspec, level_name, result)
+
+
+def _check_array(
+    view: StoreView, rel: str, aspec: dict, level_name: str, result: ValidationResult
+) -> None:
+    """Check one array path: presence (if required), dtype and ndim."""
+    arr = view.arrays.get(rel)
+    if arr is None:
+        if aspec.get("required", False):
+            result.errors.append(f"[{level_name}] required array '{rel}' is missing")
+        return
+    if arr.dtype != aspec["dtype"]:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected "
+            f"{aspec['dtype']!r}"
+        )
+    if arr.ndim != aspec["ndim"]:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
+        )
 
 
 def _check_attrs(

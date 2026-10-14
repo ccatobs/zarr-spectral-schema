@@ -103,21 +103,28 @@ def _write_arrays(
     rel_prefix: str,
     omit: set[str],
     emit_optional: bool,
+    array_overrides: dict[str, dict] | None = None,
 ) -> None:
     """Create a group's arrays under ``parent``.
 
     ``rel_prefix`` is the store-relative path of ``parent`` (for ``omit`` keys).
     Required arrays are always created; optional arrays only when ``emit_optional``
     (the fixtures emit a realistic subset so optional-present paths are exercised).
+    An array family (``prefix``) is emitted as its first member ``<prefix>0``.
+    ``array_overrides`` maps a store-relative path to ``dtype``/``ndim`` values
+    that replace the declared ones (wrong-typed negatives).
     """
+    array_overrides = array_overrides or {}
     for array_name, aspec in group_spec.get("arrays", {}).items():
-        rel = f"{rel_prefix}/{array_name}"
+        name = f"{aspec['prefix']}0" if "prefix" in aspec else array_name
+        rel = f"{rel_prefix}/{name}"
         if rel in omit:
             continue
         if not aspec.get("required", False) and not emit_optional:
             continue
+        aspec = {**aspec, **array_overrides.get(rel, {})}
         shape = tuple([1] * aspec["ndim"])
-        parent.create_array(name=array_name, shape=shape, dtype=aspec["dtype"])
+        parent.create_array(name=name, shape=shape, dtype=aspec["dtype"])
 
 
 def _write_version_attrs(
@@ -195,6 +202,7 @@ def emit_l1_single(
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
+    array_overrides: dict[str, dict] | None = None,
 ) -> Path:
     """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
 
@@ -228,10 +236,10 @@ def emit_l1_single(
         if gspec.get("placement") != "scan_or_band":
             continue
         if gspec.get("inline", False):
-            _write_arrays(scan, gspec, _SCAN, omit, emit_optional=True)
+            _write_arrays(scan, gspec, _SCAN, omit, True, array_overrides)
         else:
             sub = scan.require_group(gname)
-            _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, emit_optional=True)
+            _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, True, array_overrides)
     return out_dir
 
 
@@ -362,6 +370,11 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
     # The completeness marker holds `true` (a DSL value constraint).
     emit_l1_single(out / "l1_incomplete.zarr", scan_attr_overrides={"l1_complete": False})
+    # The skydiff group declares the spectrum_ family: spectrum_0 is checked.
+    emit_l1_single(
+        out / "l1_bad_skydiff.zarr",
+        array_overrides={f"{_SCAN}/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}},
+    )
     # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
     emit_l1_single(out / "l1_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
 

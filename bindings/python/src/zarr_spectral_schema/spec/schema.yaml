@@ -295,14 +295,15 @@ levels:
         placement: scan_or_band
         inline: false
         arrays:
-          # On disk: spectrum_<h>. The const is the "spectrum" prefix.
-          spectrum:     { dtype: float64, ndim: 3, required: false, const: SKYDIFF_SPECTRUM }
+          # On disk: spectrum_<h>, matched as the `spectrum_` family (every array
+          # whose name starts with the prefix). The const is the "spectrum" stem.
+          spectrum:     { dtype: float64, ndim: 3, required: false, prefix: spectrum_, const: SKYDIFF_SPECTRUM }
       skychopdiff:             # → const SKYCHOPDIFF_GROUP
         placement: scan_or_band
         inline: false
         arrays:
-          # On disk: spectrum_<on>_<j>. The const is the "spectrum" prefix.
-          spectrum:     { dtype: float64, ndim: 3, required: false, const: SKYCHOPDIFF_SPECTRUM }
+          # On disk: spectrum_<on>_<j>, matched as the `spectrum_` family.
+          spectrum:     { dtype: float64, ndim: 3, required: false, prefix: spectrum_, const: SKYCHOPDIFF_SPECTRUM }
 
 # Ordered name lists → `pub const … : &[&str]` (membership/routing; exact order).
 lists:
