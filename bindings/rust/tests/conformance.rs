@@ -140,14 +140,6 @@ fn version_equal_is_green() {
 }
 
 #[test]
-fn version_older_minor_is_green() {
-    let f = emit_fixtures();
-    let r = zss::check(&f.join("ver_older.zarr"));
-    assert!(r.ok(), "expected green, got: {:?}", r.errors);
-    assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
-}
-
-#[test]
 fn version_newer_minor_warns_but_passes() {
     let f = emit_fixtures();
     let r = zss::check(&f.join("ver_newer_minor.zarr"));
@@ -187,13 +179,20 @@ fn version_l0_integer_newer_major_errors() {
 }
 
 #[test]
-fn version_below_floor_errors() {
+fn version_below_floor_is_one_version_error() {
+    // min_supported names the oldest version whose stores pass the structural
+    // check; the fixtures are structurally current, so the version is the only error.
     let f = emit_fixtures();
-    let r = zss::check(&f.join("ver_below_floor.zarr"));
-    assert!(!r.ok(), "below-min_supported must error");
-    assert!(
-        r.errors.iter().any(|e| e.contains("cal_schema_version")),
-        "expected below-floor error, got: {:?}",
-        r.errors
-    );
+    for (name, attr) in [
+        ("ver_below_floor.zarr", "cal_schema_version"),
+        ("ver_l0_below_floor.zarr", "l0_schema_version"),
+    ] {
+        let r = zss::check(&f.join(name));
+        assert_eq!(r.errors.len(), 1, "{name}: expected one error, got: {:?}", r.errors);
+        assert!(
+            r.errors[0].contains(attr) && r.errors[0].contains("minimum supported"),
+            "{name}: expected a below-floor error, got: {:?}",
+            r.errors
+        );
+    }
 }

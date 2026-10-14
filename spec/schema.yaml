@@ -30,18 +30,19 @@
 spec_version: "0.1.0"
 
 # Producer-owned, ON-DISK version attributes. Consumer checks `>= min_supported`
-# (warn newer-minor, error newer-major) — two-axis negotiation.
+# (warn newer-minor, error newer-major) — two-axis negotiation. `min_supported`
+# names the oldest version whose stores pass the structural check below.
 versions:
   l0_schema_version:            # → const L0_SCHEMA_VERSION
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
     value: "2"
-    min_supported: "1"
+    min_supported: "2"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
     level: L1
     on_disk: string             # cal-io writes this root attr as a JSON string
     value: "1.3"
-    min_supported: "1.0"
+    min_supported: "1.3"
     const: L1_SCHEMA_VERSION
 
 # The structural contract, per data level. Each level holds named groups; each

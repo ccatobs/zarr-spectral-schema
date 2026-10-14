@@ -311,11 +311,12 @@ def emit(
 # relative to the spec's current `value` (cal=1.3); structure stays spec-current
 # so the only thing under test is the version range check. Expected outcome is
 # named for the binding tests that validate these same stores.
+# min_supported is the oldest version whose stores pass the structural check,
+# which today equals `value`, so an older minor is below the floor.
 VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
-    "ver_older.zarr": {"cal_schema_version": "1.2"},        # older minor → pass, no warning
     "ver_newer_minor.zarr": {"cal_schema_version": "1.9"},  # newer minor → warn once, pass
     "ver_newer_major.zarr": {"cal_schema_version": "2.0"},  # newer major → error
-    "ver_below_floor.zarr": {"cal_schema_version": "0.9"},  # below min_supported → error
+    "ver_below_floor.zarr": {"cal_schema_version": "1.2"},  # below min_supported → one error
 }
 
 # The integer-axis (L0) negotiation fixture is a structurally-valid L0 store with
@@ -323,6 +324,7 @@ VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
 # emitted by `emit_l0`, not the L1 `emit` shim above.
 L0_VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
     "ver_l0_newer_major.zarr": {"l0_schema_version": 3},    # integer axis, newer major → error
+    "ver_l0_below_floor.zarr": {"l0_schema_version": 1},    # below min_supported → one error
 }
 
 
