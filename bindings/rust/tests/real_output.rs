@@ -69,3 +69,23 @@ fn l1_raw_attrs_must_be_object() {
         "expected a raw_attrs type error, got: {e:?}"
     );
 }
+
+// ── 2. reject broken output ────────────────────────────────────────────────
+
+#[test]
+fn scan_with_seven_digit_name_is_checked() {
+    let e = errors("l0_wide_scan.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_1003537/source/data_5d")),
+        "expected scan_1003537 to be checked, got: {e:?}"
+    );
+}
+
+#[test]
+fn root_child_not_matching_scan_pattern_is_rejected() {
+    let e = errors("l0_bad_scan_name.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("'scan_12'") && m.contains("scan pattern")),
+        "expected a scan-pattern error naming scan_12, got: {e:?}"
+    );
+}

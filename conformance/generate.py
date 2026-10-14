@@ -338,6 +338,15 @@ def emit_real_output_fixtures(out: Path) -> None:
     # A scan holds exactly one of the one_of groups: both, or neither, is an error.
     emit_l0(out / "l0_both_groups.zarr", scans={_SCAN: list(one_of)})
     emit_l0(out / "l0_no_group.zarr", scans={_SCAN: []})
+    # zarr-fits names frontend b of scan N `scan_<N + 1000000·b>` (7+ digits): the
+    # validator checks that scan (here: its missing data_5d is reported).
+    emit_l0(
+        out / "l0_wide_scan.zarr",
+        scans={_SCAN: [one_of[0]], "scan_1003537": [one_of[0]]},
+        omit={f"scan_1003537/{one_of[0]}/data_5d"},
+    )
+    # A root child named scan_* that does not match the scan pattern is an error.
+    emit_l0(out / "l0_bad_scan_name.zarr", scans={_SCAN: [one_of[0]], "scan_12": [one_of[0]]})
     # calibrate writes the provenance attrs as JSON objects.
     emit_l1_single(
         out / "l1_provenance_objects.zarr",

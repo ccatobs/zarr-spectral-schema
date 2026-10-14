@@ -62,3 +62,16 @@ def test_l1_raw_attrs_must_be_object(stores):
         "raw_attrs" in e and "scan_000001" in e and "must be of type 'object'" in e
         for e in errors
     ), errors
+
+
+# ── 2. reject broken output ────────────────────────────────────────────────
+
+
+def test_scan_with_seven_digit_name_is_checked(stores):
+    errors = zss.validate(stores / "l0_wide_scan.zarr")
+    assert any("scan_1003537/source/data_5d" in e for e in errors), errors
+
+
+def test_root_child_not_matching_scan_pattern_is_rejected(stores):
+    errors = zss.validate(stores / "l0_bad_scan_name.zarr")
+    assert any("'scan_12'" in e and "scan pattern" in e for e in errors), errors

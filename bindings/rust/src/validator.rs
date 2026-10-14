@@ -191,6 +191,14 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         || !level.scan_or_band_attrs.is_empty()
         || !level.groups.is_empty();
 
+    let root_children = view.groups.keys().chain(view.arrays.keys()).filter(|p| !p.contains('/'));
+    for name in root_children {
+        if name.starts_with("scan_") && !is_scan(name) {
+            result.errors.push(format!(
+                "[{level_name}] root child '{name}' does not match the scan pattern {SCAN_PATTERN}"
+            ));
+        }
+    }
     let scan_groups: Vec<&String> = view.groups.keys().filter(|p| is_scan(p)).collect();
     if needs_scans && scan_groups.is_empty() {
         result.errors.push(format!(
@@ -440,9 +448,13 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
-/// `scan_<6 digits>` (writer pads to 6).
+/// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).
+const SCAN_PATTERN: &str = "^scan_[0-9]{6,}$";
+
+/// `scan_<6+ ASCII digits>` (writer pads to 6; frontend b of scan N is
+/// `scan_<N + 1000000·b>`).
 fn is_scan(name: &str) -> bool {
-    name.len() == 11
+    name.len() >= 11
         && name.starts_with("scan_")
         && name[5..].bytes().all(|b| b.is_ascii_digit())
 }

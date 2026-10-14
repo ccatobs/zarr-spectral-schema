@@ -35,10 +35,13 @@ from pathlib import Path
 from ._spec import load_spec
 from ._store import StoreView, read_store
 
-# Scan groups are ``scan_<6-digit>`` (writer: ``scan_{:06}``); band sub-groups are
-# ``band_<index>`` (writer: ``band_{band_index}``, base-0, no zero-pad).
-_SCAN_RE = re.compile(r"^scan_\d{6}$")
-_BAND_RE = re.compile(r"^band_\d+$")
+# Scan groups are ``scan_<6+ digits>`` (writer: ``scan_{:06}``; frontend b of scan
+# N is ``scan_<N + 1000000·b>``); band sub-groups are ``band_<index>`` (writer:
+# ``band_{band_index}``, base-0, no zero-pad). ASCII digits only, whole name
+# (fullmatch), so both bindings accept the same names.
+_SCAN_PATTERN = "^scan_[0-9]{6,}$"
+_SCAN_RE = re.compile(_SCAN_PATTERN)
+_BAND_RE = re.compile(r"band_[0-9]+")
 
 # Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
 # `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
@@ -138,7 +141,14 @@ def _check_level(
         or level.get("scan_or_band_attrs")
         or groups
     )
-    scan_groups = sorted(p for p in view.group_attrs if _SCAN_RE.match(p))
+    root_children = {p for p in (*view.group_attrs, *view.arrays) if "/" not in p}
+    for name in sorted(root_children):
+        if name.startswith("scan_") and not _SCAN_RE.fullmatch(name):
+            result.errors.append(
+                f"[{level_name}] root child '{name}' does not match the scan pattern "
+                f"{_SCAN_PATTERN}"
+            )
+    scan_groups = sorted(p for p in view.group_attrs if _SCAN_RE.fullmatch(p))
     if needs_scans and not scan_groups:
         result.errors.append(
             f"[{level_name}] no scan_<NNNNNN> groups found at the store root"
@@ -149,7 +159,7 @@ def _check_level(
         bands = sorted(
             p
             for p in view.group_attrs
-            if p.startswith(f"{sg}/") and _BAND_RE.match(p[len(sg) + 1 :])
+            if p.startswith(f"{sg}/") and _BAND_RE.fullmatch(p[len(sg) + 1 :])
         )
 
         # Per-scan-group attrs always checked at the scan group itself.
