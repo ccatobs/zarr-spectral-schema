@@ -17,6 +17,8 @@ Usage:
 
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -140,6 +142,14 @@ def _write_version_attrs(
             continue
         raw = overrides.get(attr_name, vspec["value"])
         root.attrs[attr_name] = int(raw) if vspec["on_disk"] == "integer" else str(raw)
+
+
+def _patch_meta(store: Path, rel: str, patch) -> None:
+    """Rewrite the zarr.json of node ``rel`` through ``patch(meta)``."""
+    path = store / rel / "zarr.json"
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    patch(meta)
+    path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
 # ── store emitters (one per shape) ─────────────────────────────────────────
@@ -377,6 +387,30 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
     # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
     emit_l1_single(out / "l1_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
+
+    # One parse path in both bindings: one fixture per former Rust/Python divergence.
+    # A non-finite attr value (zarr-python writes a bare NaN token).
+    emit_l1_single(out / "l1_nan_attr.zarr", scan_attr_overrides={"rest_freq_hz": float("nan")})
+    # A zarr.json that does not parse.
+    emit_l1_single(out / "l1_malformed_meta.zarr")
+    (out / "l1_malformed_meta.zarr" / _SCAN / "t_int" / "zarr.json").write_text("{not json")
+    # The object form of data_type (zarr v3 extension form).
+    emit_l1_single(out / "l1_object_dtype.zarr")
+    _patch_meta(
+        out / "l1_object_dtype.zarr",
+        f"{_SCAN}/t_int",
+        lambda m: m.__setitem__("data_type", {"name": m["data_type"], "configuration": {}}),
+    )
+    # A group where the spec names an (optional) array.
+    store = emit_l1_single(out / "l1_group_at_array.zarr")
+    shutil.rmtree(store / _SCAN / "lloadsn")
+    zarr.open_group(store=str(store), mode="r+")[_SCAN].require_group("lloadsn")
+    # Unicode digits in a version and in a scan name (ASCII-only grammar).
+    emit_l1_single(out / "ver_unicode_digits.zarr", versions={"cal_schema_version": "١.٣"})
+    emit_l0(
+        out / "l0_unicode_scan_name.zarr",
+        scans={_SCAN: [one_of[0]], "scan_٠٠٠٠٠٢": [one_of[0]]},
+    )
 
 
 def main() -> None:

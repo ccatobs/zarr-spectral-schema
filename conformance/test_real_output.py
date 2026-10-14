@@ -102,3 +102,66 @@ def test_skydiff_family_member_dtype_and_ndim_are_checked(stores):
     rel = "scan_000001/skydiff/spectrum_0"
     assert any(rel in e and "dtype" in e for e in errors), errors
     assert any(rel in e and "ndim" in e for e in errors), errors
+
+
+# ── 3. one strict parse path in both bindings ──────────────────────────────
+# Each fixture is a former divergence between the Rust and the Python verdict.
+# The messages asserted here are identical in both bindings.
+
+
+def test_non_finite_attr_is_its_own_error(stores):
+    errors = zss.validate(stores / "l1_nan_attr.zarr")
+    assert "[L1] 'scan_000001/zarr.json': non-finite number in metadata" in errors, errors
+
+
+def test_malformed_zarr_json_is_an_error_not_an_exception(stores):
+    errors = zss.validate(stores / "l1_malformed_meta.zarr")
+    assert "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)" in errors
+
+
+def test_object_form_of_data_type_is_accepted(stores):
+    assert zss.validate(stores / "l1_object_dtype.zarr") == []
+
+
+def test_group_at_array_path_is_rejected(stores):
+    errors = zss.validate(stores / "l1_group_at_array.zarr")
+    assert "[L1] 'scan_000001/lloadsn' is a group, expected an array" in errors, errors
+
+
+def test_unicode_digits_in_version_are_rejected(stores):
+    errors = zss.validate(stores / "ver_unicode_digits.zarr")
+    assert any("cal_schema_version" in e and "cannot parse version" in e for e in errors), errors
+
+
+def test_unicode_digits_in_scan_name_are_rejected(stores):
+    errors = zss.validate(stores / "l0_unicode_scan_name.zarr")
+    assert any("'scan_٠٠٠٠٠٢'" in e and "scan pattern" in e for e in errors), errors
+
+
+# ── structure findings carry the [<level>] prefix ──────────────────────────
+# calibrate (kalibrate#82) splits check() errors by this prefix: a structure
+# finding only warns there; any other error fails the run. Every structure
+# finding must therefore start with "[L0] " or "[L1] ".
+
+STRUCTURE_NEGATIVES = [
+    "l0_both_groups.zarr",
+    "l0_no_group.zarr",
+    "l0_wide_scan.zarr",
+    "l0_bad_scan_name.zarr",
+    "l0_unicode_scan_name.zarr",
+    "l0_bad_l0_complete.zarr",
+    "l0_incomplete.zarr",
+    "l1_incomplete.zarr",
+    "l1_bad_raw_attrs.zarr",
+    "l1_bad_skydiff.zarr",
+    "l1_nan_attr.zarr",
+    "l1_malformed_meta.zarr",
+    "l1_group_at_array.zarr",
+]
+
+
+@pytest.mark.parametrize("name", STRUCTURE_NEGATIVES)
+def test_structure_findings_carry_the_level_prefix(stores, name):
+    errors = zss.validate(stores / name)
+    assert errors, f"{name}: expected structure findings"
+    assert all(e.startswith(("[L0] ", "[L1] ")) for e in errors), errors

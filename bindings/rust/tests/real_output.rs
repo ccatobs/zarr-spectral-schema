@@ -121,3 +121,83 @@ fn skydiff_family_member_dtype_and_ndim_are_checked() {
     assert!(e.iter().any(|m| m.contains(rel) && m.contains("dtype")), "expected a dtype error, got: {e:?}");
     assert!(e.iter().any(|m| m.contains(rel) && m.contains("ndim")), "expected an ndim error, got: {e:?}");
 }
+
+// ── 3. one strict parse path in both bindings ──────────────────────────────
+// Each fixture is a former divergence between the Rust and the Python verdict.
+// The messages asserted here are identical in both bindings.
+
+#[test]
+fn non_finite_attr_is_its_own_error() {
+    let e = errors("l1_nan_attr.zarr");
+    let want = "[L1] 'scan_000001/zarr.json': non-finite number in metadata";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
+}
+
+#[test]
+fn malformed_zarr_json_is_an_error() {
+    let e = errors("l1_malformed_meta.zarr");
+    let want = "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
+}
+
+#[test]
+fn object_form_of_data_type_is_accepted() {
+    let e = errors("l1_object_dtype.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}
+
+#[test]
+fn group_at_array_path_is_rejected() {
+    let e = errors("l1_group_at_array.zarr");
+    let want = "[L1] 'scan_000001/lloadsn' is a group, expected an array";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
+}
+
+#[test]
+fn unicode_digits_in_version_are_rejected() {
+    let e = errors("ver_unicode_digits.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("cal_schema_version") && m.contains("cannot parse version")),
+        "expected a version parse error, got: {e:?}"
+    );
+}
+
+#[test]
+fn unicode_digits_in_scan_name_are_rejected() {
+    let e = errors("l0_unicode_scan_name.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("'scan_٠٠٠٠٠٢'") && m.contains("scan pattern")),
+        "expected a scan-pattern error, got: {e:?}"
+    );
+}
+
+// ── structure findings carry the [<level>] prefix ──────────────────────────
+// calibrate (kalibrate#82) splits check() errors by this prefix: a structure
+// finding only warns there; any other error fails the run. Every structure
+// finding must therefore start with "[L0] " or "[L1] ".
+
+#[test]
+fn structure_findings_carry_the_level_prefix() {
+    for name in [
+        "l0_both_groups.zarr",
+        "l0_no_group.zarr",
+        "l0_wide_scan.zarr",
+        "l0_bad_scan_name.zarr",
+        "l0_unicode_scan_name.zarr",
+        "l0_bad_l0_complete.zarr",
+        "l0_incomplete.zarr",
+        "l1_incomplete.zarr",
+        "l1_bad_raw_attrs.zarr",
+        "l1_bad_skydiff.zarr",
+        "l1_nan_attr.zarr",
+        "l1_malformed_meta.zarr",
+        "l1_group_at_array.zarr",
+    ] {
+        let e = errors(name);
+        assert!(!e.is_empty(), "{name}: expected structure findings");
+        assert!(
+            e.iter().all(|m| m.starts_with("[L0] ") || m.starts_with("[L1] ")),
+            "{name}: every structure finding must carry the [<level>] prefix, got: {e:?}"
+        );
+    }
+}

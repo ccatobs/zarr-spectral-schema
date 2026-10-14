@@ -19,6 +19,15 @@
 # dir; false ⇒ under `<target>/<groupname>/`). A scan group is multi-frontend iff
 # it has ≥1 `band_<M>` child; `scan_or_band` then resolves to each band group.
 #
+# Parse rule (both validators, one grammar): every zarr.json is strict JSON. A
+# non-finite number (NaN, Infinity, -Infinity) is an error of its own
+# ("non-finite number in metadata"); any other zarr.json that does not parse to
+# a JSON object is "malformed metadata". Neither validator raises; the node is
+# left out of the walk. data_type may take the string form or the object form
+# ({name: ...}); a node whose node_type differs from the one the spec names is
+# an error. Versions and scan/band names are ASCII digits only. Every structure
+# finding starts with "[<level>] "; version and level-detection errors do not.
+#
 # Codegen rule (build.rs): each array/group/version yields a Rust `pub const`.
 # Default identifier: array → UPPER(on-disk name); group → UPPER(name)_GROUP;
 # version → UPPER(attr key). Override with `const:`; suppress a group const with

@@ -119,6 +119,8 @@ struct StoreView {
     groups: BTreeMap<String, Map<String, Value>>,
     /// path → (dtype name, ndim)
     arrays: BTreeMap<String, (String, usize)>,
+    /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
+    errors: Vec<String>,
 }
 
 fn load_spec() -> Spec {
@@ -178,6 +180,11 @@ pub fn check(store: &Path) -> ValidationResult {
 
 /// Walk one applicable level's structural contract against the store view.
 fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut ValidationResult) {
+    // Metadata that did not parse is a structure finding of this level.
+    result
+        .errors
+        .extend(view.errors.iter().map(|e| format!("[{level_name}] {e}")));
+
     // Root attrs declared for this level.
     check_attrs(&view.root_attrs, &level.root_attrs, "root", level_name, result);
 
@@ -284,11 +291,13 @@ fn check_group_arrays(
             continue;
         };
         let start = format!("{prefix}/{family}");
-        let members: Vec<&String> = view
+        let mut members: Vec<&String> = view
             .arrays
             .keys()
+            .chain(view.groups.keys())
             .filter(|r| r.starts_with(&start) && !r[prefix.len() + 1..].contains('/'))
             .collect();
+        members.sort();
         if members.is_empty() && aspec.required {
             result
                 .errors
@@ -300,7 +309,7 @@ fn check_group_arrays(
     }
 }
 
-/// Check one array path: presence (if required), dtype and ndim.
+/// Check one array path: node type, presence (if required), dtype and ndim.
 fn check_array(
     view: &StoreView,
     rel: &str,
@@ -308,6 +317,12 @@ fn check_array(
     level_name: &str,
     result: &mut ValidationResult,
 ) {
+    if view.groups.contains_key(rel) {
+        result
+            .errors
+            .push(format!("[{level_name}] '{rel}' is a group, expected an array"));
+        return;
+    }
     let Some((dtype, ndim)) = view.arrays.get(rel) else {
         if aspec.required {
             result
@@ -466,14 +481,16 @@ fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut Vali
 }
 
 /// Parse `major[.minor]` (or a bare integer) into a `(major, minor)` tuple.
+///
+/// ASCII digits only (`parse::<u64>` alone would take a `+` sign), the same
+/// grammar as the meta-schema and the Python binding.
 fn parse_version(s: &str) -> Option<(u64, u64)> {
-    let mut parts = s.trim().split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = match parts.next() {
-        Some(m) => m.parse::<u64>().ok()?,
-        None => 0,
-    };
-    Some((major, minor))
+    let digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let (major, minor) = s.split_once('.').unwrap_or((s, "0"));
+    if !(digits(major) && digits(minor)) {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 /// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).
@@ -495,8 +512,14 @@ fn is_band(name: &str) -> bool {
 }
 
 // ── store reader (the per-language seam; parity with `_store.py`) ──────────
+//
+// Parse rule (both bindings, stated in the spec): metadata is strict JSON. A
+// non-finite number (`NaN`, `Infinity`, `-Infinity`) is its own error; any other
+// unparseable `zarr.json` is a malformed-metadata error. The node is then left
+// out of the view.
 
 /// Walk a Zarr v3 store and normalize every node keyed by relative path.
+/// Fails only when the root is not a readable Zarr v3 group.
 fn read_store(store: &Path) -> Result<StoreView, String> {
     let not_group = || {
         format!(
@@ -504,7 +527,7 @@ fn read_store(store: &Path) -> Result<StoreView, String> {
             store.display()
         )
     };
-    let root = read_json(&store.join("zarr.json")).ok_or_else(not_group)?;
+    let root = read_meta(&store.join("zarr.json"), "zarr.json")?.ok_or_else(not_group)?;
     if root.get("node_type").and_then(Value::as_str) != Some("group") {
         return Err(not_group());
     }
@@ -533,32 +556,76 @@ fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
             .map(|c| c.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        if let Some(meta) = read_json(&path.join("zarr.json")) {
-            match meta.get("node_type").and_then(Value::as_str) {
+        match read_meta(&path.join("zarr.json"), &format!("{rel}/zarr.json")) {
+            Err(e) => view.errors.push(e),
+            Ok(None) => {}
+            Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
                 Some("group") => {
                     view.groups.insert(rel, attributes(&meta));
                 }
                 Some("array") => {
-                    let dtype = meta.get("data_type").and_then(Value::as_str).unwrap_or("");
                     let ndim = meta.get("shape").and_then(Value::as_array).map_or(0, Vec::len);
-                    view.arrays.insert(rel, (dtype.to_string(), ndim));
+                    view.arrays.insert(rel, (dtype_name(meta.get("data_type")), ndim));
                 }
                 _ => {}
-            }
+            },
         }
         walk(root, &path, view);
     }
 }
 
+/// Parse one `zarr.json`: `Ok(None)` when absent, `Err` naming `rel` when it
+/// does not parse to a JSON object.
+fn read_meta(path: &Path, rel: &str) -> Result<Option<Map<String, Value>>, String> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text = std::fs::read(path).ok().and_then(|b| String::from_utf8(b).ok());
+    match text.as_deref().map(serde_json::from_str::<Value>) {
+        Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
+        Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {
+            Err(format!("'{rel}': non-finite number in metadata"))
+        }
+        _ => Err(format!("'{rel}': malformed metadata (not valid JSON)")),
+    }
+}
+
+/// True when `text` holds a bare `NaN` or `Infinity` token outside a string —
+/// the non-JSON number literals that serde_json rejects and Python's json accepts.
+fn has_non_finite(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let (mut in_string, mut escaped) = (false, false);
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_string {
+            match (escaped, b) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+        } else if b == b'"' {
+            in_string = true;
+        } else if bytes[i..].starts_with(b"NaN") || bytes[i..].starts_with(b"Infinity") {
+            return true;
+        }
+    }
+    false
+}
+
 /// A node's `attributes` map (empty if absent or not an object).
-fn attributes(meta: &Value) -> Map<String, Value> {
+fn attributes(meta: &Map<String, Value>) -> Map<String, Value> {
     meta.get("attributes")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default()
 }
 
-fn read_json(path: &Path) -> Option<Value> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+/// Normalize a Zarr v3 `data_type` to its plain name: the string form, or the
+/// `name` of the object (extension) form; anything else has no name ("").
+fn dtype_name(data_type: Option<&Value>) -> String {
+    match data_type {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Object(o)) => o.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+        _ => String::new(),
+    }
 }

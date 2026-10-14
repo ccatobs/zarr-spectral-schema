@@ -43,6 +43,7 @@ from ._store import StoreView, read_store
 _SCAN_PATTERN = "^scan_[0-9]{6,}$"
 _SCAN_RE = re.compile(_SCAN_PATTERN)
 _BAND_RE = re.compile(r"band_[0-9]+")
+_VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
 
 # Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
 # `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
@@ -80,7 +81,10 @@ def validate(store_path: str | Path) -> list[str]:
 def check(store_path: str | Path) -> ValidationResult:
     """Validate a store against the spec, returning errors and warnings."""
     spec = load_spec()
-    view = read_store(store_path)
+    try:
+        view = read_store(store_path)
+    except ValueError as e:  # the root is not a readable group: nothing to walk
+        return ValidationResult(errors=[str(e)])
     return check_view(view, spec)
 
 
@@ -127,6 +131,9 @@ def _check_level(
     view: StoreView, level_name: str, level: dict, result: ValidationResult
 ) -> None:
     """Walk one applicable level's structural contract against the store view."""
+    # Metadata that did not parse is a structure finding of this level.
+    result.errors.extend(f"[{level_name}] {e}" for e in view.errors)
+
     # Root attrs declared for this level.
     _check_attrs(
         view.root_attrs, level.get("root_attrs", {}), "root", level_name, result
@@ -228,7 +235,9 @@ def _check_group_arrays(
             continue
         start = f"{prefix}/{aspec['prefix']}"
         members = sorted(
-            r for r in view.arrays if r.startswith(start) and "/" not in r[len(prefix) + 1 :]
+            r
+            for r in (*view.arrays, *view.group_attrs)
+            if r.startswith(start) and "/" not in r[len(prefix) + 1 :]
         )
         if not members and aspec.get("required", False):
             result.errors.append(f"[{level_name}] required array family '{start}*' is missing")
@@ -239,7 +248,10 @@ def _check_group_arrays(
 def _check_array(
     view: StoreView, rel: str, aspec: dict, level_name: str, result: ValidationResult
 ) -> None:
-    """Check one array path: presence (if required), dtype and ndim."""
+    """Check one array path: node type, presence (if required), dtype and ndim."""
+    if rel in view.group_attrs:
+        result.errors.append(f"[{level_name}] '{rel}' is a group, expected an array")
+        return
     arr = view.arrays.get(rel)
     if arr is None:
         if aspec.get("required", False):
@@ -368,14 +380,16 @@ def _negotiate(attr_name: str, vspec: dict, value: object) -> tuple[list[str], l
 
 
 def _parse_version(value: object) -> tuple[int, int] | None:
-    """Parse ``major[.minor]`` (or a bare integer) into a ``(major, minor)`` tuple."""
-    parts = str(value).strip().split(".")
-    try:
-        major = int(parts[0])
-        minor = int(parts[1]) if len(parts) > 1 else 0
-    except (ValueError, IndexError):
+    """Parse ``major[.minor]`` (or a bare integer) into a ``(major, minor)`` tuple.
+
+    ASCII digits only (``int`` alone would take Unicode digits, signs, spaces and
+    underscores), the same grammar as the meta-schema and the Rust binding.
+    """
+    text = str(value)
+    if not _VERSION_RE.fullmatch(text):
         return None
-    return (major, minor)
+    major, _, minor = text.partition(".")
+    return (int(major), int(minor or 0))
 
 
 def _is_int(value: object) -> bool:
