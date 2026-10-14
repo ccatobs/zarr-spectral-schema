@@ -153,6 +153,13 @@ fn malformed_zarr_json_is_an_error() {
 }
 
 #[test]
+fn deeply_nested_zarr_json_is_malformed() {
+    let e = errors("l1_deep_meta.zarr");
+    let want = "[L1] 'scan_000001/zarr.json': malformed metadata (not valid JSON)";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
+}
+
+#[test]
 fn object_form_of_data_type_is_accepted() {
     let e = errors("l1_object_dtype.zarr");
     assert!(e.is_empty(), "expected green, got: {e:?}");
@@ -205,6 +212,7 @@ fn structure_findings_carry_the_level_prefix() {
         "l1_bad_skydiff.zarr",
         "l1_nan_attr.zarr",
         "l1_malformed_meta.zarr",
+        "l1_deep_meta.zarr",
         "l1_group_at_array.zarr",
     ] {
         let e = errors(name);

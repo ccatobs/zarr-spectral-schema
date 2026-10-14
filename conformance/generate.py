@@ -417,6 +417,12 @@ def emit_real_output_fixtures(out: Path) -> None:
     (out / "l1_malformed_meta.zarr" / _SCAN / "t_int" / "zarr.json").write_text(
         "{not json"
     )
+    # Metadata nested past any parser depth limit: 100,000 unclosed `[` in an attr.
+    emit_l1_single(out / "l1_deep_meta.zarr")
+    (out / "l1_deep_meta.zarr" / _SCAN / "zarr.json").write_text(
+        '{"zarr_format": 3, "node_type": "group", "attributes": {"deep": '
+        + "[" * 100_000
+    )
     # The object form of data_type (zarr v3 extension form).
     emit_l1_single(out / "l1_object_dtype.zarr")
     _patch_meta(

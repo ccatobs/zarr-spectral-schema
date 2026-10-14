@@ -127,6 +127,11 @@ def test_malformed_zarr_json_is_an_error_not_an_exception(stores):
     )
 
 
+def test_deeply_nested_zarr_json_is_malformed_not_an_exception(stores):
+    errors = zss.validate(stores / "l1_deep_meta.zarr")
+    assert "[L1] 'scan_000001/zarr.json': malformed metadata (not valid JSON)" in errors
+
+
 def test_object_form_of_data_type_is_accepted(stores):
     assert zss.validate(stores / "l1_object_dtype.zarr") == []
 
@@ -166,6 +171,7 @@ STRUCTURE_NEGATIVES = [
     "l1_bad_skydiff.zarr",
     "l1_nan_attr.zarr",
     "l1_malformed_meta.zarr",
+    "l1_deep_meta.zarr",
     "l1_group_at_array.zarr",
 ]
 

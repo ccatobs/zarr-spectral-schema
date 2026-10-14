@@ -63,7 +63,7 @@ levels:
     detect: l0_schema_version
     # A scan is single-purpose (CONTEXT.md): each scan group holds exactly one of
     # these groups. Only the present group's arrays are checked; both or neither
-    # is an error. zarr-fits routes each scan to one group by SOBSMODE.
+    # is an error.
     one_of: [source, calibration]
     # Root-group session attrs (zarr-fits-core writer.rs:61-103). All are written
     # unconditionally, but profile/site/observer/fits_folder may be empty

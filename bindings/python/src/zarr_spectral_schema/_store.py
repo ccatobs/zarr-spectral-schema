@@ -89,7 +89,9 @@ def _read_node(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None
     except _NonFinite:
         errors.append(f"'{rel}': non-finite number in metadata")
         return None
-    except (ValueError, OSError):  # JSONDecodeError and UnicodeDecodeError are ValueErrors
+    # JSONDecodeError and UnicodeDecodeError are ValueErrors; RecursionError is
+    # metadata nested past the parser's depth (serde_json stops at 128 levels).
+    except (ValueError, OSError, RecursionError):
         meta = None
     if not isinstance(meta, dict):
         errors.append(f"'{rel}': malformed metadata (not valid JSON)")
