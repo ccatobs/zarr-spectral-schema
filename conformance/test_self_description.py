@@ -90,6 +90,22 @@ def test_pixel_offset_and_spectra_disagreeing_on_subscans_are_rejected(stores):
     ), errors
 
 
+@pytest.mark.parametrize(
+    "name, member",
+    [
+        ("l0_valid_dumps_subscans.zarr", "source/n_valid_dumps"),
+        ("l1_valid_dumps_subscans.zarr", "n_valid_dumps"),
+    ],
+)
+def test_valid_dump_count_disagreeing_on_subscans_is_rejected(stores, name, member):
+    # #20 deferred this length check of n_valid_dumps against S to #19.
+    errors = zss.validate(stores / name)
+    assert any(
+        "'scan_000001'" in e and "dimension 'subscan'" in e and f"3 in [{member}]" in e
+        for e in errors
+    ), errors
+
+
 # ── 2. flag bits ───────────────────────────────────────────────────────────
 
 # The bit table of calibrate cal-core/src/flags.rs and YODA io/flags.py: what
@@ -278,6 +294,8 @@ SELF_DESCRIPTION_NEGATIVES = [
     "l0_multi_band_without_data.zarr",
     "l0_no_l0_complete.zarr",
     "l1_no_identity.zarr",
+    "l0_valid_dumps_subscans.zarr",
+    "l1_valid_dumps_subscans.zarr",
 ]
 
 

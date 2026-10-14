@@ -56,6 +56,9 @@ _VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
 # "/" (absolute path) is excluded: it names a file on one host only.
 _URI_REFERENCE_RE = re.compile(r"(?!/)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+")
 
+# Spec sections are walked in sorted key order, as the Rust binding's BTreeMaps
+# are, so both bindings report the same findings in the same order.
+
 # Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
 # `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
 _TYPE_CHECKS = {
@@ -191,7 +194,7 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
         # attr on the scan group (it belongs on each band).
         for b in bands:
             _check_attrs(view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result)
-        for name in level.get("scan_or_band_attrs", {}) if bands else ():
+        for name in sorted(level.get("scan_or_band_attrs", {})) if bands else ():
             if name in view.group_attrs[sg]:
                 result.errors.append(
                     f"[{level_name}] attribute '{name}' at '{sg}' belongs on each band "
@@ -212,7 +215,7 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                 result,
             )
         for placement, where in targets.items():
-            placed = {n: g for n, g in groups.items() if g.get("placement") == placement}
+            placed = {n: g for n, g in sorted(groups.items()) if g.get("placement") == placement}
             one_of = [n for n in level.get("one_of", []) if n in placed]
             for t in where:
                 present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
@@ -226,7 +229,7 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                     _check_group_arrays(
                         view, t, gname, group, level_name, result, seen.setdefault(t, [])
                     )
-        for t, arrays in seen.items():
+        for t, arrays in sorted(seen.items()):
             _check_shared_dims(t, arrays, level_name, result)
 
 
@@ -248,7 +251,7 @@ def _check_group_arrays(
     """
     inline = group.get("inline", False)
     prefix = base if inline else f"{base}/{group_name}"
-    for array_name, aspec in group.get("arrays", {}).items():
+    for array_name, aspec in sorted(group.get("arrays", {}).items()):
         if "prefix" not in aspec:
             _check_array(view, f"{prefix}/{array_name}", aspec, level_name, result, seen)
             continue
@@ -360,7 +363,7 @@ def _check_attrs(
     the store path used in
     messages (``root`` or a group path) so failures point at the exact location.
     """
-    for name, aspec in declared.items():
+    for name, aspec in sorted(declared.items()):
         present = name in attrs
         if not present:
             if aspec.get("required", False):

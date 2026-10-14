@@ -666,6 +666,15 @@ def emit_self_description_fixtures(out: Path) -> None:
         out / "l1_pixel_offset_subscans.zarr",
         array_overrides={f"{_SCAN}/pixel_offset_lon": {"shape": (1, 1, 3)}},
     )
+    # The valid dump count (#20) shares the subscan axis S (deferred to #19).
+    emit_l0(
+        out / "l0_valid_dumps_subscans.zarr",
+        array_overrides={f"{_SCAN}/source/n_valid_dumps": {"shape": (3,)}},
+    )
+    emit_l1_single(
+        out / "l1_valid_dumps_subscans.zarr",
+        array_overrides={f"{_SCAN}/n_valid_dumps": {"shape": (3,)}},
+    )
     # 3. A scan without the frame set, an L0 store without its site location.
     emit_l1_single(
         out / "l1_no_frame.zarr",

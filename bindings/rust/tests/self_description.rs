@@ -104,6 +104,18 @@ fn pixel_offset_and_spectra_disagreeing_on_subscans_are_rejected() {
     );
 }
 
+#[test]
+fn valid_dump_count_disagreeing_on_subscans_is_rejected() {
+    // #20 deferred this length check of n_valid_dumps against S to #19.
+    for (name, member) in [
+        ("l0_valid_dumps_subscans.zarr", "source/n_valid_dumps"),
+        ("l1_valid_dumps_subscans.zarr", "n_valid_dumps"),
+    ] {
+        let want = format!("3 in [{member}]");
+        assert_any(name, &["'scan_000001'", "dimension 'subscan'", &want]);
+    }
+}
+
 // ── 2. flag bits ───────────────────────────────────────────────────────────
 
 #[test]
@@ -355,6 +367,8 @@ fn new_structure_findings_carry_the_level_prefix() {
         "l0_multi_band_without_data.zarr",
         "l0_no_l0_complete.zarr",
         "l1_no_identity.zarr",
+        "l0_valid_dumps_subscans.zarr",
+        "l1_valid_dumps_subscans.zarr",
     ] {
         let e = errors(name);
         assert!(!e.is_empty(), "{name}: expected structure findings");
