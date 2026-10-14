@@ -6,6 +6,10 @@
 //! so consts and validator cannot diverge, and the two bindings implement one
 //! interpretation that cannot drift.
 //!
+//! The store is first read into the same normalized view the Python reader
+//! builds (root attrs, group attrs and arrays keyed by store-relative path), so
+//! both interpreters walk the same shape.
+//!
 //! Three checks:
 //!
 //! * **Level detection** (Slice 4, #5) — a store is L0 *or* L1, detected by which
@@ -101,6 +105,16 @@ impl ValidationResult {
     }
 }
 
+/// The normalized store view (parity with the Python `StoreView`): every node
+/// keyed by its store-relative path, e.g. `scan_000001/source/data_5d`.
+#[derive(Default)]
+struct StoreView {
+    root_attrs: Map<String, Value>,
+    groups: BTreeMap<String, Map<String, Value>>,
+    /// path → (dtype name, ndim)
+    arrays: BTreeMap<String, (String, usize)>,
+}
+
 fn load_spec() -> Spec {
     // The synced copy that build.rs also reads; include_str! is relative to this file.
     serde_yaml::from_str(include_str!("../spec/schema.yaml")).expect("parse synced spec/schema.yaml")
@@ -117,22 +131,13 @@ pub fn validate(store: &Path) -> Vec<String> {
 pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
     let mut result = ValidationResult::default();
-
-    let root = match read_json(&store.join("zarr.json")) {
-        Some(v) if v.get("node_type").and_then(|n| n.as_str()) == Some("group") => v,
-        _ => {
-            result.errors.push(format!(
-                "{}: not a Zarr v3 group (missing/!group root zarr.json)",
-                store.display()
-            ));
+    let view = match read_store(store) {
+        Ok(view) => view,
+        Err(e) => {
+            result.errors.push(e);
             return result;
         }
     };
-    let empty = Map::new();
-    let root_attrs = root
-        .get("attributes")
-        .and_then(|a| a.as_object())
-        .unwrap_or(&empty);
 
     // ── level detection ────────────────────────────────────────────────────
     // A store is exactly one level, marked by which `detect` root attr it carries.
@@ -142,7 +147,7 @@ pub fn check(store: &Path) -> ValidationResult {
         .filter(|(_, lvl)| {
             lvl.detect
                 .as_deref()
-                .is_some_and(|d| root_attrs.contains_key(d))
+                .is_some_and(|d| view.root_attrs.contains_key(d))
         })
         .collect();
 
@@ -164,32 +169,26 @@ pub fn check(store: &Path) -> ValidationResult {
     // carries l0_schema_version, an L1 store cal_schema_version — checking the
     // absent one would spuriously fail every single-level store.
     let applicable_levels: Vec<&str> = applicable.iter().map(|(name, _)| name.as_str()).collect();
-    negotiate_versions(&spec, root_attrs, &applicable_levels, &mut result);
+    negotiate_versions(&spec, &view.root_attrs, &applicable_levels, &mut result);
 
     for (level_name, level) in &applicable {
-        check_level(store, level_name, level, root_attrs, &mut result);
+        check_level(&view, level_name, level, &mut result);
     }
 
     result
 }
 
-/// Walk one applicable level's structural contract against the store.
-fn check_level(
-    store: &Path,
-    level_name: &str,
-    level: &Level,
-    root_attrs: &Map<String, Value>,
-    result: &mut ValidationResult,
-) {
+/// Walk one applicable level's structural contract against the store view.
+fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut ValidationResult) {
     // Root attrs declared for this level.
-    check_attrs(root_attrs, &level.root_attrs, "root", level_name, result);
+    check_attrs(&view.root_attrs, &level.root_attrs, "root", level_name, result);
 
     let needs_scans = !level.scan_attrs.is_empty()
         || !level.band_attrs.is_empty()
         || !level.scan_or_band_attrs.is_empty()
         || !level.groups.is_empty();
 
-    let scan_groups = child_groups(store, is_scan);
+    let scan_groups: Vec<&String> = view.groups.keys().filter(|p| is_scan(p)).collect();
     if needs_scans && scan_groups.is_empty() {
         result.errors.push(format!(
             "[{level_name}] no scan_<NNNNNN> groups found at the store root"
@@ -197,47 +196,31 @@ fn check_level(
         return;
     }
 
-    for sg in &scan_groups {
-        let scan_dir = store.join(sg);
-        let bands = child_groups(&scan_dir, is_band);
-        let multi = !bands.is_empty();
+    let empty = Map::new();
+    for sg in scan_groups {
+        let bands: Vec<String> = view
+            .groups
+            .keys()
+            .filter(|p| p.strip_prefix(&format!("{sg}/")).is_some_and(is_band))
+            .cloned()
+            .collect();
 
         // Per-scan-group attrs always checked at the scan group itself.
-        let scan_attrs = group_attrs(&scan_dir);
-        check_attrs(&scan_attrs, &level.scan_attrs, sg, level_name, result);
+        check_attrs(&view.groups[sg], &level.scan_attrs, sg, level_name, result);
 
         // Multi-frontend: per-band attrs on each band group.
-        if multi {
-            for b in &bands {
-                let band_attrs = group_attrs(&scan_dir.join(b));
-                let where_ = format!("{sg}/{b}");
-                check_attrs(&band_attrs, &level.band_attrs, &where_, level_name, result);
-            }
+        for b in &bands {
+            check_attrs(&view.groups[b], &level.band_attrs, b, level_name, result);
         }
 
         // scan_or_band resolves to the scan group (single) or each band (multi).
-        // Targets carry the relative path (for messages) and the on-disk dir.
-        let targets: Vec<(String, std::path::PathBuf)> = if multi {
-            bands
-                .iter()
-                .map(|b| (format!("{sg}/{b}"), scan_dir.join(b)))
-                .collect()
-        } else {
-            vec![(sg.clone(), scan_dir.clone())]
-        };
-
-        for (trel, tdir) in &targets {
-            let target_attrs = group_attrs(tdir);
-            check_attrs(
-                &target_attrs,
-                &level.scan_or_band_attrs,
-                trel,
-                level_name,
-                result,
-            );
+        let targets = if bands.is_empty() { vec![sg.clone()] } else { bands };
+        for t in &targets {
+            let attrs = view.groups.get(t).unwrap_or(&empty);
+            check_attrs(attrs, &level.scan_or_band_attrs, t, level_name, result);
             for (gname, group) in &level.groups {
                 if group.placement.as_deref() == Some("scan_or_band") {
-                    check_group_arrays(tdir, trel, gname, group, level_name, result);
+                    check_group_arrays(view, t, gname, group, level_name, result);
                 }
             }
         }
@@ -246,34 +229,33 @@ fn check_level(
         // group regardless of multi-frontend.
         for (gname, group) in &level.groups {
             if group.placement.as_deref() == Some("scan") {
-                check_group_arrays(&scan_dir, sg, gname, group, level_name, result);
+                check_group_arrays(view, sg, gname, group, level_name, result);
             }
         }
     }
 }
 
-/// Check one group's arrays under `base_dir` (store-relative path `base_rel`).
+/// Check one group's arrays under `base`.
 ///
 /// `inline` groups place arrays directly in `base`; otherwise they sit under
 /// `base/<group_name>/`. Required arrays must exist (dtype + ndim checked);
 /// optional arrays are checked only when present.
 fn check_group_arrays(
-    base_dir: &Path,
-    base_rel: &str,
+    view: &StoreView,
+    base: &str,
     group_name: &str,
     group: &Group,
     level_name: &str,
     result: &mut ValidationResult,
 ) {
-    let (prefix_dir, prefix_rel) = if group.inline {
-        (base_dir.to_path_buf(), base_rel.to_string())
+    let prefix = if group.inline {
+        base.to_string()
     } else {
-        (base_dir.join(group_name), format!("{base_rel}/{group_name}"))
+        format!("{base}/{group_name}")
     };
     for (array_name, aspec) in &group.arrays {
-        let rel = format!("{prefix_rel}/{array_name}");
-        let meta = read_json(&prefix_dir.join(array_name).join("zarr.json"));
-        let Some(meta) = meta else {
+        let rel = format!("{prefix}/{array_name}");
+        let Some((dtype, ndim)) = view.arrays.get(&rel) else {
             if aspec.required {
                 result
                     .errors
@@ -281,18 +263,13 @@ fn check_group_arrays(
             }
             continue;
         };
-        let dtype = meta.get("data_type").and_then(|d| d.as_str()).unwrap_or("");
-        let ndim = meta
-            .get("shape")
-            .and_then(|s| s.as_array())
-            .map_or(0, |a| a.len());
-        if dtype != aspec.dtype {
+        if *dtype != aspec.dtype {
             result.errors.push(format!(
                 "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
                 aspec.dtype
             ));
         }
-        if ndim != aspec.ndim {
+        if *ndim != aspec.ndim {
             result.errors.push(format!(
                 "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
                 aspec.ndim
@@ -442,36 +419,6 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
     Some((major, minor))
 }
 
-/// Names of immediate child groups of `dir` whose name passes `pred`, sorted.
-///
-/// A child is a "group" iff it holds a `zarr.json` with `node_type: group`; we
-/// only enumerate by directory name and let the attr read confirm the node type
-/// where it matters. Sorted to match the Python reader's `sorted(...)` order.
-fn child_groups(dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if pred(&name) && entry.path().join("zarr.json").is_file() {
-            out.push(name);
-        }
-    }
-    out.sort();
-    out
-}
-
-/// Read a group node's `attributes` map (empty if absent / not a group).
-fn group_attrs(dir: &Path) -> Map<String, Value> {
-    read_json(&dir.join("zarr.json"))
-        .and_then(|v| v.get("attributes").and_then(|a| a.as_object()).cloned())
-        .unwrap_or_default()
-}
-
 /// `scan_<6 digits>` (writer pads to 6).
 fn is_scan(name: &str) -> bool {
     name.len() == 11
@@ -484,6 +431,70 @@ fn is_band(name: &str) -> bool {
     name.len() > 5
         && name.starts_with("band_")
         && name[5..].bytes().all(|b| b.is_ascii_digit())
+}
+
+// ── store reader (the per-language seam; parity with `_store.py`) ──────────
+
+/// Walk a Zarr v3 store and normalize every node keyed by relative path.
+fn read_store(store: &Path) -> Result<StoreView, String> {
+    let not_group = || {
+        format!(
+            "{}: not a Zarr v3 group (missing/!group root zarr.json)",
+            store.display()
+        )
+    };
+    let root = read_json(&store.join("zarr.json")).ok_or_else(not_group)?;
+    if root.get("node_type").and_then(Value::as_str) != Some("group") {
+        return Err(not_group());
+    }
+    let mut view = StoreView {
+        root_attrs: attributes(&root),
+        ..StoreView::default()
+    };
+    walk(store, store, &mut view);
+    Ok(view)
+}
+
+/// Recurse below `dir`, recording each child node that holds a `zarr.json`.
+fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(root)
+            .expect("walked path lies under the store root")
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        if let Some(meta) = read_json(&path.join("zarr.json")) {
+            match meta.get("node_type").and_then(Value::as_str) {
+                Some("group") => {
+                    view.groups.insert(rel, attributes(&meta));
+                }
+                Some("array") => {
+                    let dtype = meta.get("data_type").and_then(Value::as_str).unwrap_or("");
+                    let ndim = meta.get("shape").and_then(Value::as_array).map_or(0, Vec::len);
+                    view.arrays.insert(rel, (dtype.to_string(), ndim));
+                }
+                _ => {}
+            }
+        }
+        walk(root, &path, view);
+    }
+}
+
+/// A node's `attributes` map (empty if absent or not an object).
+fn attributes(meta: &Value) -> Map<String, Value> {
+    meta.get("attributes")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn read_json(path: &Path) -> Option<Value> {
