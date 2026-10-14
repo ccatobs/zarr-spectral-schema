@@ -41,6 +41,12 @@
       "propertyNames": { "$ref": "#/$defs/ident" },
       "additionalProperties": { "type": "string" }
     },
+    "flag_bits": {
+      "description": "Bit table of the L1 `flags` array: const identifier → bit index. Generates `pub const NAME: u16 = 1 << bit` (Python: an int of the same value).",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ident" },
+      "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 15 }
+    },
     "precedence_aliases": {
       "description": "Validator-only spec data (generates NO const): for each canonical attribute (the key), the ordered source-keyword precedence chain it may be resolved from. Documents resolution provenance; the generic validator does not enforce it.",
       "type": "object",
@@ -148,6 +154,10 @@
           "enum": ["string", "integer", "number", "boolean", "array", "object"]
         },
         "required": { "type": "boolean" },
+        "sentinel": {
+          "description": "The attr may hold the not-applicable sentinel instead of a value: \"NONE\" for a string, null for a number.",
+          "type": "boolean"
+        },
         "equals": {
           "description": "Value constraint: when present on disk, the attribute must hold exactly this value.",
           "type": ["string", "integer", "number", "boolean"]
@@ -155,12 +165,19 @@
         "format": {
           "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty and never an absolute path.",
           "enum": ["uri-reference"]
+        },
+        "enum": {
+          "description": "Value set: when present on disk, the attribute holds one of these values (or its not-applicable sentinel when `sentinel` is true).",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": ["string", "integer", "number"] }
         }
       }
     },
     "array": {
       "type": "object",
-      "required": ["dtype", "ndim", "required"],
+      "required": ["dtype", "ndim", "dims", "required"],
       "additionalProperties": false,
       "properties": {
         "dtype": {
@@ -176,6 +193,16 @@
           ]
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "dims": {
+          "description": "Ordered axis names (one per dimension). Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "units": {
+          "description": "FITS unit string as astropy parses it (\"\" = dimensionless). Producers write it as the array's `units` attr. Omitted for labels, indices, counts of items, strings and bitmasks.",
+          "type": "string"
+        },
         "required": { "type": "boolean" },
         "attrs": {
           "description": "Attributes of the array itself (e.g. keepbits), checked like group attrs.",

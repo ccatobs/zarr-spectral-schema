@@ -6,7 +6,8 @@
 //!
 //! Identifier rules: array → UPPER(on-disk name); group → UPPER(name)_GROUP
 //! (or none if `const: false`); version → UPPER(attr key). Any node may override
-//! with `const:`. `lists:` → `&[&str]`; `markers:` → `&str`. Consts are
+//! with `const:`. `lists:` → `&[&str]`; `markers:` → `&str`; `flag_bits:` →
+//! `u16` masks (`1 << bit`). Consts are
 //! deduplicated by name (an array shared across groups yields one const); a name
 //! bound to two different values is a hard error.
 
@@ -88,6 +89,22 @@ fn main() {
             let name = key.as_str().expect("marker key is a string").to_string();
             let value = val.as_str().expect("marker value is a string");
             add_scalar(&mut consts, name, value);
+        }
+    }
+
+    // ── flag bits (bit index → u16 mask) ──
+    if let Some(bits) = spec.get("flag_bits").and_then(Value::as_mapping) {
+        for (key, val) in bits {
+            let name = key.as_str().expect("flag bit key is a string").to_string();
+            let bit = val.as_u64().expect("flag bit is an integer");
+            let decl = format!("pub const {name}: u16 = 1 << {bit};");
+            if let Some(existing) = consts.get(&name) {
+                assert_eq!(
+                    existing, &decl,
+                    "const {name} declared with conflicting values"
+                );
+            }
+            consts.insert(name, decl);
         }
     }
 

@@ -38,6 +38,46 @@ _SCAN = "scan_000001"
 # store is modelled by omitting exactly these (they are all `required: false`).
 _IDENTITY_L0_ATTRS = {"frontend", "pixels_per_array", "raw_attrs"}
 
+# The required L1 frame set of #19: attrs (scan-or-band, and the site at scan
+# placement) and arrays (scan-or-band, inline).
+FRAME_ATTRS = (
+    "specsys",
+    "veldef",
+    "vlsr_source",
+    "vlsr_source_frame",
+    "ref_channel_base",
+    "coord_frame",
+    "equinox",
+    "projection",
+    "offset_convention",
+    "temperature_scale",
+    "eta_fss",
+    "eta_mb",
+    "gain_el_correction",
+    "sideband_mode",
+    "image_sideband_fraction",
+    "site_longitude_deg",
+    "site_latitude_deg",
+    "site_altitude_m",
+)
+# Malformed `shape` values of one array: one fixture each.
+BAD_SHAPES = {
+    "string": ["1"],
+    "null": [None],
+    "nested": [[1]],
+    "float": [1.0],
+    "negative": [-1],
+}
+
+FRAME_ARRAYS = (
+    "v_frame",
+    "ref_lon",
+    "ref_lat",
+    "platform_lon",
+    "platform_lat",
+    "platform_alt",
+)
+
 
 def load_spec() -> dict:
     return yaml.safe_load(SPEC.read_text(encoding="utf-8"))
@@ -55,6 +95,8 @@ def _sample_attr(aspec: dict, name: str):
     """A representative on-disk value for a declared attr of the given type."""
     if "equals" in aspec:
         return aspec["equals"]
+    if "enum" in aspec:
+        return aspec["enum"][0]
     t = aspec["type"]
     if t == "string":
         return f"{name}_value"
@@ -77,6 +119,7 @@ def _write_attrs(
     omit_attrs: set[str],
     emit_optional: bool,
     overrides: dict | None = None,
+    not_applicable: bool = False,
 ) -> None:
     """Write declared attrs onto ``group``.
 
@@ -85,7 +128,9 @@ def _write_attrs(
     a realistic subset). ``omit_attrs`` drops specific attrs for negative stores.
     ``overrides`` substitutes a literal on-disk value for a named attr (forcing it
     to be written even when optional) — used to emit wrong-typed negatives whose
-    value deliberately violates the declared ``type``.
+    value deliberately violates the declared ``type``. ``not_applicable`` writes
+    the not-applicable sentinel ("NONE" for a string, null for a number) for
+    every attr that admits one (``sentinel: true``).
     """
     overrides = overrides or {}
     for name, aspec in declared.items():
@@ -95,6 +140,9 @@ def _write_attrs(
             group.attrs[name] = overrides[name]
             continue
         if not aspec.get("required", False) and not emit_optional:
+            continue
+        if not_applicable and aspec.get("sentinel"):
+            group.attrs[name] = "NONE" if aspec["type"] == "string" else None
             continue
         group.attrs[name] = _sample_attr(aspec, name)
 
@@ -114,12 +162,16 @@ def _write_arrays(
     Required arrays are always created; optional arrays only when ``emit_optional``
     (the fixtures emit a realistic subset so optional-present paths are exercised).
     An array family (``prefix``) is emitted as its first member ``<prefix>0``.
-    ``array_overrides`` maps a store-relative path to ``dtype``/``ndim`` values
-    that replace the declared ones (wrong-typed negatives), and ``attr_values``
-    to literal array attr values. ``sharded`` writes every axis with length 2
-    and a chunk layout other than the writer default: 5-D arrays (C, D, R, A, S)
-    get the recommended one shard per pixel and subscan (C, D, 1, 1, 1) with
-    inner chunks (C/2, D, 1, 1, 1); the other arrays one chunk per element.
+    Every array is written with the spec's ``dims`` as its zarr v3
+    ``dimension_names`` and, where the spec declares ``units``, a ``units`` attr.
+    ``array_overrides`` maps a store-relative path to ``dtype``/``ndim``/
+    ``dims``/``units``/``shape`` values that replace the declared ones
+    (negatives; ``None`` writes no ``dimension_names`` / no ``units`` attr), and
+    ``attr_values`` to literal array attr values. ``sharded`` writes every axis
+    with length 2 and a chunk layout other than the writer default: 5-D arrays
+    (C, D, R, A, S) get the recommended one shard per pixel and subscan
+    (C, D, 1, 1, 1) with inner chunks (C/2, D, 1, 1, 1); the other arrays one
+    chunk per element.
     """
     array_overrides = array_overrides or {}
     for array_name, aspec in group_spec.get("arrays", {}).items():
@@ -136,11 +188,21 @@ def _write_arrays(
             layout = {"shape": (2,) * ndim, "chunks": (1,) * ndim}
             if ndim == 5:
                 layout.update(shards=(2, 2, 1, 1, 1), chunks=(1, 2, 1, 1, 1))
+        if "shape" in aspec:
+            layout["shape"] = aspec["shape"]
         # A dtype set (#20): write its first name, as the producers do by default.
         dtype = (
             aspec["dtype"][0] if isinstance(aspec["dtype"], list) else aspec["dtype"]
         )
-        arr = parent.create_array(name=name, dtype=dtype, **layout)
+        arr = parent.create_array(
+            name=name,
+            dtype=dtype,
+            dimension_names=aspec.get("dims"),
+            attributes={} if aspec.get("units") is None else {"units": aspec["units"]},
+            # NaN fill on float arrays: the not-applicable value of an array.
+            fill_value=float("nan") if dtype.startswith("float") else None,
+            **layout,
+        )
         _write_attrs(
             arr, aspec.get("attrs", {}), set(), emit_optional, aspec.get("attr_values")
         )
@@ -176,19 +238,22 @@ def emit_l0(
     out_dir: Path,
     *,
     scans: dict[str, list[str]] | None = None,
+    n_bands: int = 0,
     omit: set[str] | None = None,
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
     array_overrides: dict[str, dict] | None = None,
     sharded: bool = False,
+    not_applicable: bool = False,
 ) -> Path:
     """Emit an L0 store: scan_<N>/<group>/<arrays> + attrs.
 
     ``scans`` maps each scan group name to the ``one_of`` groups it holds. The
     default is one scan per ``one_of`` member (scan_000001 → source,
     scan_000002 → calibration), the shape zarr-fits writes. Groups outside
-    ``one_of`` go into every scan.
+    ``one_of`` go into every scan. ``n_bands`` > 0 emits a multi-frontend store:
+    scan_<N>/band_<B>/<group>/<arrays>, the scan-or-band attrs on each band.
     ``versions`` overrides the on-disk ``l0_schema_version`` (integer axis) for
     the version-negotiation fixtures while the structure stays spec-current.
     ``scan_attr_overrides`` substitutes literal scan-group attr values (for the
@@ -206,7 +271,13 @@ def emit_l0(
 
     root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
     _write_version_attrs(root, spec, "L0", versions or {})
-    _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
+    _write_attrs(
+        root,
+        level.get("root_attrs", {}),
+        omit_attrs,
+        emit_optional=True,
+        not_applicable=not_applicable,
+    )
 
     for scan_name, chosen in scans.items():
         scan = root.require_group(scan_name)
@@ -217,14 +288,29 @@ def emit_l0(
             emit_optional=True,
             overrides=scan_attr_overrides,
         )
-        # L0 groups are `placement: scan, inline: false` sub-groups.
-        for gname, gspec in level.get("groups", {}).items():
-            if gname in one_of and gname not in chosen:
-                continue
-            sub = scan.require_group(gname)
-            _write_arrays(
-                sub, gspec, f"{scan_name}/{gname}", omit, True, array_overrides, sharded
+        targets = [(scan, scan_name)]
+        if n_bands:
+            targets = []
+            for idx in range(n_bands):
+                band = scan.require_group(f"band_{idx}")
+                _write_attrs(band, level.get("band_attrs", {}), omit_attrs, True)
+                targets.append((band, f"{scan_name}/band_{idx}"))
+        for target, rel in targets:
+            _write_attrs(
+                target,
+                level.get("scan_or_band_attrs", {}),
+                omit_attrs,
+                emit_optional=True,
+                overrides=scan_attr_overrides,
             )
+            # L0 groups are `placement: scan_or_band, inline: false` sub-groups.
+            for gname, gspec in level.get("groups", {}).items():
+                if gname in one_of and gname not in chosen:
+                    continue
+                sub = target.require_group(gname)
+                _write_arrays(
+                    sub, gspec, f"{rel}/{gname}", omit, True, array_overrides, sharded
+                )
     return out_dir
 
 
@@ -237,6 +323,7 @@ def emit_l1_single(
     scan_attr_overrides: dict | None = None,
     array_overrides: dict[str, dict] | None = None,
     sharded: bool = False,
+    not_applicable: bool = False,
 ) -> Path:
     """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
 
@@ -244,6 +331,7 @@ def emit_l1_single(
     version-negotiation fixtures while the structure stays spec-current.
     ``scan_attr_overrides`` substitutes literal values for scan-group attrs
     (``scan_attrs`` and ``scan_or_band_attrs`` both land on the scan group).
+    ``not_applicable`` writes the sentinel in every field that admits one.
     """
     omit = omit or set()
     omit_attrs = omit_attrs or set()
@@ -264,6 +352,7 @@ def emit_l1_single(
             omit_attrs,
             emit_optional=True,
             overrides=scan_attr_overrides,
+            not_applicable=not_applicable,
         )
 
     for gname, gspec in level.get("groups", {}).items():
@@ -356,18 +445,18 @@ def emit(
 
 
 # Version-negotiation fixtures (Slice 3, #4). Each overrides one on-disk version
-# relative to the spec's current `value` (cal=1.3); structure stays spec-current
+# relative to the spec's current `value` (cal=2.0); structure stays spec-current
 # so the only thing under test is the version range check. Expected outcome is
 # named for the binding tests that validate these same stores.
 # min_supported is the oldest version whose stores pass the structural check,
 # which today equals `value`, so an older minor is below the floor.
 VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
     "ver_newer_minor.zarr": {
-        "cal_schema_version": "1.9"
+        "cal_schema_version": "2.9"
     },  # newer minor → warn once, pass
-    "ver_newer_major.zarr": {"cal_schema_version": "2.0"},  # newer major → error
+    "ver_newer_major.zarr": {"cal_schema_version": "3.0"},  # newer major → error
     "ver_below_floor.zarr": {
-        "cal_schema_version": "1.2"
+        "cal_schema_version": "1.3"
     },  # below min_supported → one error
 }
 
@@ -376,10 +465,10 @@ VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
 # emitted by `emit_l0`, not the L1 `emit` shim above.
 L0_VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
     "ver_l0_newer_major.zarr": {
-        "l0_schema_version": 3
+        "l0_schema_version": 4
     },  # integer axis, newer major → error
     "ver_l0_below_floor.zarr": {
-        "l0_schema_version": 1
+        "l0_schema_version": 2
     },  # below min_supported → one error
 }
 
@@ -394,8 +483,8 @@ def emit_real_output_fixtures(out: Path) -> None:
     # A scan holds exactly one of the one_of groups: both, or neither, is an error.
     emit_l0(out / "l0_both_groups.zarr", scans={_SCAN: list(one_of)})
     emit_l0(out / "l0_no_group.zarr", scans={_SCAN: []})
-    # zarr-fits names frontend b of scan N `scan_<N + 1000000·b>` (7+ digits): the
-    # validator checks that scan (here: its missing data_5d is reported).
+    # A scan number may take 7+ digits: the validator checks that scan (here: its
+    # missing data_5d is reported).
     emit_l0(
         out / "l0_wide_scan.zarr",
         scans={_SCAN: [one_of[0]], "scan_1003537": [one_of[0]]},
@@ -425,7 +514,11 @@ def emit_real_output_fixtures(out: Path) -> None:
     emit_l1_single(
         out / "l1_bad_skydiff.zarr",
         array_overrides={
-            f"{_SCAN}/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}
+            f"{_SCAN}/skydiff/spectrum_0": {
+                "dtype": "float32",
+                "ndim": 2,
+                "dims": ["channel", "receiver"],
+            }
         },
     )
     # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
@@ -518,7 +611,7 @@ def emit_storage_fixtures(out: Path) -> None:
         array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": "12"}}},
     )
     # The valid dump count per subscan is int32 [S] where present.
-    bad = {"dtype": "float64", "ndim": 2}
+    bad = {"dtype": "float64", "ndim": 2, "dims": ["dump", "subscan"]}
     emit_l0(
         out / "l0_bad_valid_dumps.zarr",
         array_overrides={f"{_SCAN}/source/n_valid_dumps": bad},
@@ -540,6 +633,90 @@ def emit_storage_fixtures(out: Path) -> None:
     # source_l0_store holds an RFC 3986 URI reference, never an absolute path.
     for name, (value, _ok) in SOURCE_L0_STORE_FIXTURES.items():
         emit_l1_single(out / name, scan_attr_overrides={"source_l0_store": value})
+
+
+def emit_self_description_fixtures(out: Path) -> None:
+    """Fixtures for #19 (dimensions, units, flag bits and the scientific frame).
+
+    Both bindings validate these same stores: the Python tests call this
+    function, the Rust tests run ``main()``.
+    """
+    spectra = f"{_SCAN}/spectra"
+    # 1. Each array carries its spec dims as zarr v3 dimension_names.
+    emit_l1_single(
+        out / "l1_no_dimension_names.zarr", array_overrides={spectra: {"dims": None}}
+    )
+    emit_l1_single(
+        out / "l1_wrong_dimension_names.zarr",
+        array_overrides={
+            spectra: {"dims": ["subscan", "array", "receiver", "dump", "channel"]}
+        },
+    )
+    # ...and the units attr the spec declares for it.
+    emit_l1_single(out / "l1_no_units.zarr", array_overrides={spectra: {"units": None}})
+    emit_l1_single(
+        out / "l1_wrong_units.zarr", array_overrides={spectra: {"units": "mK"}}
+    )
+    # Arrays at one target agree on the length of each shared dimension.
+    emit_l1_single(
+        out / "l1_channel_mismatch.zarr",
+        array_overrides={f"{_SCAN}/tau_signal": {"shape": (2,)}},
+    )
+    emit_l1_single(
+        out / "l1_pixel_offset_subscans.zarr",
+        array_overrides={f"{_SCAN}/pixel_offset_lon": {"shape": (1, 1, 3)}},
+    )
+    # The valid dump count (#20) shares the subscan axis S (deferred to #19).
+    emit_l0(
+        out / "l0_valid_dumps_subscans.zarr",
+        array_overrides={f"{_SCAN}/source/n_valid_dumps": {"shape": (3,)}},
+    )
+    emit_l1_single(
+        out / "l1_valid_dumps_subscans.zarr",
+        array_overrides={f"{_SCAN}/n_valid_dumps": {"shape": (3,)}},
+    )
+    # 3. A scan without the frame set, an L0 store without its site location.
+    emit_l1_single(
+        out / "l1_no_frame.zarr",
+        omit_attrs=set(FRAME_ATTRS),
+        omit={f"{_SCAN}/{name}" for name in FRAME_ARRAYS},
+    )
+    emit_l0(
+        out / "l0_no_site.zarr",
+        omit_attrs={"site_longitude_deg", "site_latitude_deg", "site_altitude_m"},
+    )
+    # Where a field does not apply, it holds the not-applicable sentinel; a
+    # field that always applies admits none.
+    emit_l1_single(out / "l1_not_applicable.zarr", not_applicable=True)
+    emit_l0(out / "l0_not_applicable.zarr", not_applicable=True)
+    emit_l1_single(out / "l1_eta_fss_null.zarr", scan_attr_overrides={"eta_fss": None})
+    # A vocabulary field holds a value of its declared set.
+    emit_l1_single(out / "l1_bad_specsys.zarr", scan_attr_overrides={"specsys": "LSR"})
+    # 4. Multi-frontend L1: identity, quality record and provenance sit on each
+    # band; a scan group that holds one of them is an error.
+    emit_l1_multi(out / "l1_multi_band_without_qa.zarr", omit_band_attrs={1: {"qa"}})
+    store = emit_l1_multi(out / "l1_multi_scan_arrays.zarr")
+    zarr.open_group(store=str(store), mode="r+")[_SCAN].attrs["arrays"] = ["HFA"]
+    # Required since L0 3 / L1 2.0 (maintainer, 2026-10-14): the L0 completeness
+    # marker on each scan placement target, the L1 identity at scan-or-band.
+    emit_l0(out / "l0_no_l0_complete.zarr", omit_attrs={"l0_complete"})
+    emit_l1_single(out / "l1_no_identity.zarr", omit_attrs={"frontend", "raw_attrs"})
+    # A shape that is not a list of non-negative integers is a finding of its
+    # own, not an exception and not a length (review of PR 25, round 1).
+    for name, shape in BAD_SHAPES.items():
+        store = emit_l1_single(out / f"l1_shape_{name}.zarr")
+        _patch_meta(
+            store,
+            f"{_SCAN}/t_int",
+            lambda m, shape=shape: m.__setitem__("shape", shape),
+        )
+    # Multi-frontend L0: scan_N/band_B/, every band checked.
+    emit_l0(out / "l0_multi.zarr", n_bands=2)
+    emit_l0(
+        out / "l0_multi_band_without_data.zarr",
+        n_bands=2,
+        omit={f"{_SCAN}/band_1/source/data_5d"},
+    )
 
 
 def main() -> None:
@@ -583,6 +760,7 @@ def main() -> None:
 
     emit_real_output_fixtures(out)
     emit_storage_fixtures(out)
+    emit_self_description_fixtures(out)
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.

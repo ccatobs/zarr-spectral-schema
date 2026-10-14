@@ -45,7 +45,7 @@ fn emit_fixtures() -> PathBuf {
 #[test]
 fn constants_generated_from_spec() {
     assert_eq!(zss::DATA_5D, "data_5d");
-    assert_eq!(zss::L0_SCHEMA_VERSION, "2");
+    assert_eq!(zss::L0_SCHEMA_VERSION, "3");
 }
 
 // ── positive: each shape validates green ───────────────────────────────────
@@ -147,7 +147,7 @@ fn version_newer_minor_warns_but_passes() {
     assert_eq!(r.warnings.len(), 1, "expected one warning, got: {:?}", r.warnings);
     let w = &r.warnings[0];
     assert!(
-        w.contains("cal_schema_version") && w.contains("1.9") && w.contains("1.3"),
+        w.contains("cal_schema_version") && w.contains("2.9") && w.contains("2.0"),
         "warning should name the axis and both versions, got: {w}"
     );
     // Back-compat: validate() returns errors only → empty for a warning-only store.
@@ -160,7 +160,7 @@ fn version_newer_major_errors() {
     let r = zss::check(&f.join("ver_newer_major.zarr"));
     assert!(!r.ok(), "newer-major must error");
     assert!(
-        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("2.0")),
+        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("3.0")),
         "expected newer-major error, got: {:?}",
         r.errors
     );

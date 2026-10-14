@@ -1,8 +1,11 @@
 # Real stores
 
-Producer output that both validators must accept with zero errors. The
-real-store tests (`conformance/test_real_stores.py`, `bindings/rust/tests/real_stores.rs`)
-validate every store listed here and fail when one is missing.
+Producer output that both validators must read cleanly. The real-store tests
+(`conformance/test_real_stores.py`, `bindings/rust/tests/real_stores.rs`)
+validate every store listed here and fail when one is missing. Since #19
+(L0 3, L1 2.0) these stores sit below `min_supported`: each gets exactly one
+version error, the below-floor error, and no metadata error. Fresh stores
+replace them once the producers write the #19 contract (ccatobs/kalibrate#101).
 
 | Store | Level | Shape |
 |---|---|---|

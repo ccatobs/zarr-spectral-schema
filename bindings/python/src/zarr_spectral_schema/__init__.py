@@ -17,17 +17,18 @@ from ._validator import ValidationResult, check, validate, validate_view
 __all__ = ["ValidationResult", "check", "constants", "load_spec", "validate", "validate_view"]
 
 
-def _build_constants() -> dict[str, str | tuple[str, ...]]:
+def _build_constants() -> dict[str, str | int | tuple[str, ...]]:
     """Spec-derived constants, mirroring the Rust binding's generated consts.
 
     Same identifier rules as build.rs: array → UPPER(on-disk name); group →
     UPPER(name)_GROUP (or none if ``const: false``); version → UPPER(attr key);
-    any node may override via ``const``. ``lists`` → tuples; ``markers`` → str.
+    any node may override via ``const``. ``lists`` → tuples; ``markers`` → str;
+    ``flag_bits`` → int masks (``1 << bit``).
     """
     spec = load_spec()
-    consts: dict[str, str | tuple[str, ...]] = {}
+    consts: dict[str, str | int | tuple[str, ...]] = {}
 
-    def put(name: str, value: str | tuple[str, ...]) -> None:
+    def put(name: str, value: str | int | tuple[str, ...]) -> None:
         if name in consts and consts[name] != value:
             raise ValueError(f"const {name} declared with conflicting values")
         consts[name] = value
@@ -49,10 +50,13 @@ def _build_constants() -> dict[str, str | tuple[str, ...]]:
     for name, items in spec.get("lists", {}).items():
         put(name, tuple(items))
 
+    for name, bit in spec.get("flag_bits", {}).items():
+        put(name, 1 << bit)
+
     return consts
 
 
 # Spec-derived constants exposed both as a dict and as module attributes.
-constants: dict[str, str | tuple[str, ...]] = _build_constants()
+constants: dict[str, str | int | tuple[str, ...]] = _build_constants()
 globals().update(constants)
 __all__ += list(constants)

@@ -21,9 +21,14 @@
 //!   arrays/attrs, the L0 `source`/`calibration` sub-groups, and the diagnostic
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
 //!   The spec's `one_of` (exactly one of these groups per target), `equals`
-//!   (attr value constraint), `format` (`uri-reference`), `prefix` (array
-//!   family), dtype sets and array `attrs` are interpreted the same way. Every structure finding starts with `[<level>] `; version and
-//!   level-detection errors do not (calibrate splits on this prefix, kalibrate#82).
+//!   (attr value constraint), `format` (`uri-reference`), `enum` (value set),
+//!   `sentinel` (not-applicable value), `prefix` (array family), dtype sets and
+//!   array `attrs` are interpreted the same way. Each array's `dimension_names`
+//!   and `units` attr are checked against its `dims`/`units`; arrays at one
+//!   target agree on the length of each shared dimension; a multi-frontend scan
+//!   group holds no scan-or-band attr. Every structure finding starts with
+//!   `[<level>] `; version and level-detection errors do not (calibrate splits
+//!   on this prefix, kalibrate#82).
 //! * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
 //!   is range-checked against the spec's supported window (`min_supported` ..
 //!   `value`): below the floor or a newer *major* is an error; a newer *minor* is
@@ -83,6 +88,12 @@ struct AttrSpec {
     /// String format constraint (`uri-reference`).
     #[serde(default)]
     format: Option<String>,
+    /// The attr may hold the not-applicable sentinel instead of a value.
+    #[serde(default)]
+    sentinel: bool,
+    /// Value set: the attr holds one of these values.
+    #[serde(default)]
+    r#enum: Option<Vec<Value>>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +109,11 @@ struct Group {
 struct ArraySpec {
     dtype: Dtype,
     ndim: usize,
+    /// Ordered axis names, checked against the zarr v3 `dimension_names`.
+    dims: Vec<String>,
+    /// FITS unit string, checked against the array's `units` attr.
+    #[serde(default)]
+    units: Option<String>,
     required: bool,
     /// Attributes of the array itself (e.g. `keepbits`).
     #[serde(default)]
@@ -153,10 +169,19 @@ impl ValidationResult {
 struct StoreView {
     root_attrs: Map<String, Value>,
     groups: BTreeMap<String, Map<String, Value>>,
-    /// path → (dtype name, ndim, attributes)
-    arrays: BTreeMap<String, (String, usize, Map<String, Value>)>,
+    arrays: BTreeMap<String, ArrayMeta>,
     /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
     errors: Vec<String>,
+}
+
+/// One array node of the view (parity with the Python `ArrayView`).
+struct ArrayMeta {
+    dtype: String,
+    /// List of non-negative integers, or `None` when the metadata holds anything else.
+    shape: Option<Vec<u64>>,
+    /// zarr v3 `dimension_names` as parsed (`None` when absent or null).
+    dimension_names: Option<Value>,
+    attrs: Map<String, Value>,
 }
 
 fn load_spec() -> Spec {
@@ -273,9 +298,20 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         // Per-scan-group attrs always checked at the scan group itself.
         check_attrs(&view.groups[sg], &level.scan_attrs, sg, level_name, result);
 
-        // Multi-frontend: per-band attrs on each band group.
+        // Multi-frontend: per-band attrs on each band group, and no scan-or-band
+        // attr on the scan group (it belongs on each band).
         for b in &bands {
             check_attrs(&view.groups[b], &level.band_attrs, b, level_name, result);
+        }
+        if !bands.is_empty() {
+            for name in level.scan_or_band_attrs.keys() {
+                if view.groups[sg].contains_key(name) {
+                    result.errors.push(format!(
+                        "[{level_name}] attribute '{name}' at '{sg}' belongs on each band \
+                         of a multi-frontend scan, not on the scan group"
+                    ));
+                }
+            }
         }
 
         // `scan` placement resolves to the scan group; `scan_or_band` to the
@@ -294,6 +330,8 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
                 result,
             );
         }
+        // (path, dims, shape) of each array checked, per target.
+        let mut seen: BTreeMap<String, Vec<Seen>> = BTreeMap::new();
         for (placement, targets) in [("scan", vec![sg.clone()]), ("scan_or_band", sob)] {
             let placed: Vec<(&String, &Group)> = level
                 .groups
@@ -320,9 +358,52 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
                     if one_of.contains(gname) && !present.contains(gname) {
                         continue;
                     }
-                    check_group_arrays(view, t, gname, group, level_name, result);
+                    let seen = seen.entry(t.clone()).or_default();
+                    check_group_arrays(view, t, gname, group, level_name, result, seen);
                 }
             }
+        }
+        for (t, arrays) in &seen {
+            check_shared_dims(t, arrays, level_name, result);
+        }
+    }
+}
+
+/// One checked array: (store path, declared dims, on-disk shape).
+type Seen = (String, Vec<String>, Vec<u64>);
+
+/// Arrays at one target that share an axis name agree on its length.
+fn check_shared_dims(
+    target: &str,
+    arrays: &[Seen],
+    level_name: &str,
+    result: &mut ValidationResult,
+) {
+    let mut lengths: BTreeMap<&str, BTreeMap<u64, Vec<&str>>> = BTreeMap::new();
+    for (rel, dims, shape) in arrays {
+        for (dim, n) in dims.iter().zip(shape) {
+            lengths
+                .entry(dim)
+                .or_default()
+                .entry(*n)
+                .or_default()
+                .push(&rel[target.len() + 1..]);
+        }
+    }
+    for (dim, by_len) in &lengths {
+        if by_len.len() > 1 {
+            let parts: Vec<String> = by_len
+                .iter()
+                .map(|(n, names)| {
+                    let mut names = names.clone();
+                    names.sort_unstable();
+                    format!("{n} in [{}]", names.join(", "))
+                })
+                .collect();
+            result.errors.push(format!(
+                "[{level_name}] arrays at '{target}' disagree on the length of dimension '{dim}': {}",
+                parts.join("; ")
+            ));
         }
     }
 }
@@ -340,6 +421,7 @@ fn check_group_arrays(
     group: &Group,
     level_name: &str,
     result: &mut ValidationResult,
+    seen: &mut Vec<Seen>,
 ) {
     let prefix = if group.inline {
         base.to_string()
@@ -354,6 +436,7 @@ fn check_group_arrays(
                 aspec,
                 level_name,
                 result,
+                seen,
             );
             continue;
         };
@@ -371,18 +454,21 @@ fn check_group_arrays(
             ));
         }
         for rel in members {
-            check_array(view, rel, aspec, level_name, result);
+            check_array(view, rel, aspec, level_name, result, seen);
         }
     }
 }
 
-/// Check one array path: node type, presence (if required), dtype, ndim, attrs.
+/// Check one array path: node type, presence (if required), dtype, ndim,
+/// `dimension_names` against the spec's `dims`, the `units` attr and the
+/// array's own `attrs`.
 fn check_array(
     view: &StoreView,
     rel: &str,
     aspec: &ArraySpec,
     level_name: &str,
     result: &mut ValidationResult,
+    seen: &mut Vec<Seen>,
 ) {
     if view.groups.contains_key(rel) {
         result.errors.push(format!(
@@ -390,7 +476,7 @@ fn check_array(
         ));
         return;
     }
-    let Some((dtype, ndim, attrs)) = view.arrays.get(rel) else {
+    let Some(arr) = view.arrays.get(rel) else {
         if aspec.required {
             result
                 .errors
@@ -398,25 +484,69 @@ fn check_array(
         }
         return;
     };
-    if !aspec.dtype.allows(dtype) {
+    if !aspec.dtype.allows(&arr.dtype) {
         result.errors.push(format!(
-            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {}",
-            aspec.dtype
+            "[{level_name}] array '{rel}' dtype {:?} != expected {}",
+            arr.dtype, aspec.dtype
         ));
     }
-    if *ndim != aspec.ndim {
-        result.errors.push(format!(
-            "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
+    match &arr.shape {
+        None => result.errors.push(format!(
+            "[{level_name}] array '{rel}' shape is not a list of non-negative integers"
+        )),
+        Some(shape) if shape.len() != aspec.ndim => result.errors.push(format!(
+            "[{level_name}] array '{rel}' ndim {} != expected {}",
+            shape.len(),
             aspec.ndim
-        ));
+        )),
+        Some(shape) if shape.len() == aspec.dims.len() => {
+            seen.push((rel.to_string(), aspec.dims.clone(), shape.clone()));
+        }
+        Some(_) => {}
     }
-    check_attrs(attrs, &aspec.attrs, rel, level_name, result);
+    let dims: Vec<Value> = aspec.dims.iter().cloned().map(Value::String).collect();
+    match &arr.dimension_names {
+        None => result.errors.push(format!(
+            "[{level_name}] array '{rel}' has no dimension_names (expected {})",
+            json_list(&dims)
+        )),
+        Some(Value::Array(names)) if *names == dims => {}
+        Some(other) => result.errors.push(format!(
+            "[{level_name}] array '{rel}' dimension_names {} != expected {}",
+            other
+                .as_array()
+                .map_or_else(|| other.to_string(), |a| json_list(a)),
+            json_list(&dims)
+        )),
+    }
+    if let Some(units) = &aspec.units {
+        let expected = Value::String(units.clone());
+        match arr.attrs.get("units") {
+            None => result.errors.push(format!(
+                "[{level_name}] array '{rel}' has no units attr (expected {expected})"
+            )),
+            Some(got) if *got != expected => result.errors.push(format!(
+                "[{level_name}] array '{rel}' units {got} != expected {expected}"
+            )),
+            Some(_) => {}
+        }
+    }
+    check_attrs(&arr.attrs, &aspec.attrs, rel, level_name, result);
+}
+
+/// Render a JSON list as Python's `json.dumps` does (`["a", "b"]`), so both
+/// bindings word a finding the same way.
+fn json_list(items: &[Value]) -> String {
+    let parts: Vec<String> = items.iter().map(Value::to_string).collect();
+    format!("[{}]", parts.join(", "))
 }
 
 /// Check declared attrs at one placement location (`where_` is the store path
 /// used in messages). Required attrs must be present and (if present)
-/// type-checked; optional attrs are type-checked only when present. An `equals`
-/// value constraint and a `format` are checked after the type.
+/// type-checked; optional attrs are type-checked only when present. An attr with
+/// `sentinel: true` may hold the not-applicable sentinel instead. An `enum`
+/// value set, an `equals` value constraint and a `format` are checked after the
+/// type.
 fn check_attrs(
     attrs: &Map<String, Value>,
     declared: &BTreeMap<String, AttrSpec>,
@@ -433,11 +563,19 @@ fn check_attrs(
             }
             continue;
         };
+        if aspec.sentinel && *value == sentinel(&aspec.r#type) {
+            continue;
+        }
         if !type_matches(&aspec.r#type, value) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must be of type \
                  {:?}, got {value}",
                 aspec.r#type
+            ));
+        } else if let Some(set) = aspec.r#enum.as_ref().filter(|s| !s.contains(value)) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be one of {}, got {value}",
+                json_list(set)
             ));
         } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
             result.errors.push(format!(
@@ -451,6 +589,14 @@ fn check_attrs(
                  (RFC 3986) and not an absolute path, got {value}"
             ));
         }
+    }
+}
+
+/// The not-applicable sentinel of an attr type: "NONE" or JSON null.
+fn sentinel(attr_type: &str) -> Value {
+    match attr_type {
+        "string" => Value::String("NONE".into()),
+        _ => Value::Null,
     }
 }
 
@@ -596,8 +742,7 @@ fn is_uri_reference(value: &str) -> bool {
 /// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).
 const SCAN_PATTERN: &str = "^scan_[0-9]{6,}$";
 
-/// `scan_<6+ ASCII digits>` (writer pads to 6; frontend b of scan N is
-/// `scan_<N + 1000000·b>`).
+/// `scan_<6+ ASCII digits>` (writer pads to 6).
 fn is_scan(name: &str) -> bool {
     name.len() >= 11 && name.starts_with("scan_") && name[5..].bytes().all(|b| b.is_ascii_digit())
 }
@@ -803,13 +948,22 @@ fn walk<B: Backend>(
                     }
                 }
                 Some("array") => {
-                    let ndim = meta
+                    let shape = meta
                         .get("shape")
                         .and_then(Value::as_array)
-                        .map_or(0, Vec::len);
+                        .and_then(|s| s.iter().map(Value::as_u64).collect());
+                    let dimension_names = meta
+                        .get("dimension_names")
+                        .filter(|v| !v.is_null())
+                        .cloned();
                     view.arrays.insert(
                         rel,
-                        (dtype_name(meta.get("data_type")), ndim, attributes(&meta)),
+                        ArrayMeta {
+                            dtype: dtype_name(meta.get("data_type")),
+                            shape,
+                            dimension_names,
+                            attrs: attributes(&meta),
+                        },
                     );
                 }
                 _ => {}

@@ -17,7 +17,8 @@
 # is L0 or L1, detected by its root `detect` attr. Each group declares `placement`
 # (`scan` | `scan_or_band`) + `inline` (true ⇒ arrays sit directly in the target
 # dir; false ⇒ under `<target>/<groupname>/`). A scan group is multi-frontend iff
-# it has ≥1 `band_<M>` child; `scan_or_band` then resolves to each band group.
+# it has ≥1 `band_<M>` child; `scan_or_band` then resolves to each band group,
+# and a `scan_or_band_attrs` attr on the scan group itself is an error.
 #
 # Parse rule (both validators, one grammar): every zarr.json is strict JSON. A
 # non-finite number (NaN, Infinity, -Infinity) is an error of its own
@@ -89,6 +90,24 @@
 # `format: uri-reference` (RFC 3986 URI reference, not empty, not an absolute
 # path). An array entry may carry `attrs` (the array's own attrs, same rules)
 # and a dtype set (`dtype: [float64, float32]`: any name of the set).
+# An attr may carry `enum: [...]`, its value set: the attr holds one of these.
+# An attr with `sentinel: true` may hold the not-applicable sentinel instead of a
+# value: "NONE" for a string, JSON null for a number (ADR-0007). A required
+# field is always present. NaN is an array fill value only, never an attr value.
+#
+# Dimensions (#19): each array declares `dims`, its ordered axis names; producers
+# write them as the zarr v3 `dimension_names` field. Arrays at one placement
+# target (a scan group, or a band group of a multi-frontend scan) that share an
+# axis name agree on its length. The axis vocabulary: channel (C), dump (D),
+# receiver (R, a pixel of an array), array (A, a frontend-backend pair) and
+# subscan (S).
+#
+# Units (#19): an array that holds a physical quantity declares `units`, a FITS
+# unit string as astropy parses it (`K`, `Hz`, `km/s`, `deg`, `rad`, `s`; "" for
+# a dimensionless quantity). Producers write it as the array's `units` attr.
+# Labels, indices, scan numbers, counts of items (n_valid_dumps), strings and
+# the `flags` bitmask declare none.
+# A scalar attr carries its unit as a name suffix (`pwv_mm`, `site_latitude_deg`).
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
 spec_version: "0.1.0"
@@ -100,13 +119,18 @@ versions:
   l0_schema_version:            # → const L0_SCHEMA_VERSION
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
-    value: "2"
-    min_supported: "2"
+    # 3 (#19): identity and l0_complete required, dims/units, site location,
+    # scan_N/band_B layout. The validator accepts the current major only.
+    value: "3"
+    min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
     level: L1
     on_disk: string             # cal-io writes this root attr as a JSON string
-    value: "1.3"
-    min_supported: "1.3"
+    # 2.0 (#19): dims/units, the required frame set, identity required and at
+    # band placement with the quality record and provenance in multi-frontend
+    # stores. The validator accepts the current major only.
+    value: "2.0"
+    min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
 # The structural contract, per data level. Each level holds named groups; each
@@ -134,44 +158,53 @@ levels:
       profile_name:       { type: string,  required: false }
       profile_version:    { type: integer, required: false }
       observatory:        { type: string,  required: false }
-      site_latitude_deg:  { type: number,  required: false }
-      site_longitude_deg: { type: number,  required: false }
-      site_altitude_m:    { type: number,  required: false }
-    # Per-scan-group attrs (writer.rs:122-145). The first block is written
-    # unconditionally; verbatim identity passthrough (mission_id, obs_id, …)
-    # comes from scan_attrs.metadata and is store-dependent → required:false.
+      # Observatory location (#19): required. An airborne observatory has no
+      # fixed site and writes the not-applicable sentinel.
+      site_latitude_deg:  { type: number,  required: true, sentinel: true }
+      site_longitude_deg: { type: number,  required: true, sentinel: true }
+      site_altitude_m:    { type: number,  required: true, sentinel: true }
+    # Per-scan-group attrs (writer.rs:122-145): what all bands of a scan share.
+    # Verbatim identity passthrough (mission_id, obs_id, …) comes from
+    # scan_attrs.metadata and is store-dependent → required:false.
     scan_attrs:
       scan_number:         { type: integer, required: true }
       source:              { type: string,  required: true }
       instmode:            { type: string,  required: true }
-      line:                { type: string,  required: true }
       date_obs:            { type: string,  required: true }
       telescope:           { type: string,  required: true }
       observer:            { type: string,  required: true }
-      rest_freq_hz:        { type: number,  required: true }
       velocity_source_kms: { type: number,  required: true }
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
       obs_id:              { type: string,  required: false }
       aor_id:              { type: string,  required: false }
-      # ── Identity + provenance (additive; the L0 writer starts emitting these
-      # in a later slice, so all required:false — pre-#6 stores still validate).
-      # The law (ADR-0007): identity is producer-written and forwarded, never
-      # re-derived. `frontend` is written here at L0 and forwarded L0→L1 (retiring
-      # the fragile longest-common-prefix re-derivation).
-      frontend:         { type: string, required: false }
+    # Multi-frontend layout (#19): frontend b of scan N sits at scan_N/band_b/,
+    # as at L1. There is no virtual scan number. Per-band-group attrs:
+    band_attrs:
+      band_index:       { type: integer, required: true }
+    # Attrs of one frontend: at the scan group when single-frontend, at each
+    # band group when multi-frontend (a scan-or-band attr on the scan group of a
+    # multi-frontend scan is an error).
+    scan_or_band_attrs:
+      line:             { type: string,  required: true }
+      rest_freq_hz:     { type: number,  required: true }
+      # ── Identity + provenance (required since L0 3, #19). The law (ADR-0007):
+      # identity is producer-written and forwarded, never re-derived. `frontend`
+      # is written here at L0 and forwarded L0→L1 (retiring the fragile
+      # longest-common-prefix re-derivation).
+      frontend:         { type: string, required: true }
       # Per-array pixel layout, canonical = a LIST OF LISTS positionally aligned
       # with the scan's `arrays` order (identical L0/L1). Declared `type: array`
       # ONLY: the legacy HashMap/dict representation (nondeterministic key order)
       # is deliberately NOT admitted — a JSON object fails `type: array`, so the
       # dict form cannot be lifted. The generic validator type-checks the outer
       # array; the inner per-array string lists are writer-enforced.
-      pixels_per_array: { type: array, required: false }
+      pixels_per_array: { type: array, required: true }
       # Verbatim source-keyword provenance for the resolved identity/geometry, so
-      # offsets are auditable and re-derivable. ONE optional object-typed group
-      # attr; the generic validator type-checks the top-level object only — the
-      # nested shape below is writer-enforced (+ writer-side conformance CI),
-      # backed by the verbatim `raw_fits_headers [S]` full-header array:
+      # offsets are auditable and re-derivable. ONE object-typed group attr; the
+      # generic validator type-checks the top-level object only — the nested
+      # shape below is writer-enforced (+ writer-side conformance CI), backed by
+      # the verbatim `raw_fits_headers [S]` full-header array:
       #   - per-subscan rotating terms:   POSANGLE, ANGLEDIFF, COSYDEL
       #   - per-pixel/array static geometry: RXDX/RXDY, REFRXDX/REFRXDY,
       #                                      SIGNRXDX/SIGNRXDY
@@ -182,85 +215,91 @@ levels:
       #     pre-2.12 upGREAT footprints onto the boresight)
       #   - substitution markers: mjd (computed from DATE-OBS vs keyword),
       #     tsky (tamb-substituted vs keyword)
-      raw_attrs:        { type: object, required: false }
-      # Per-scan completeness marker: zarr-fits writes it as the last write of a
-      # scan (kalibrate#101). Optional so stores written before it still validate.
-      l0_complete:      { type: boolean, required: false, equals: true }
+      raw_attrs:        { type: object, required: true }
+      # Completeness marker: zarr-fits writes it as the last write of a scan or
+      # band (kalibrate#101). Required since L0 3, as l1_complete is at L1: a
+      # reader reads no unit without its completeness marker.
+      l0_complete:      { type: boolean, required: true, equals: true }
     groups:
       source:                   # → const SOURCE_GROUP
-        # L0 obs sub-group: arrays under scan_<N>/source/ (inline:false).
-        placement: scan
+        # L0 obs sub-group: arrays under scan_<N>/source/, or
+        # scan_<N>/band_<B>/source/ when multi-frontend (inline:false).
+        placement: scan_or_band
         inline: false
         arrays:
           # data_5d: raw spectrometer counts; axis order C,D,R,A,S (group attr).
-          data_5d:          { dtype: int32,   ndim: 5, required: true }
+          data_5d:          { dtype: int32,   ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true }
           # Coordinate arrays (1D [S]); dtype split per the L0 writer's match.
-          mjd:              { dtype: float64, ndim: 1, required: true }
-          exptime:          { dtype: float32, ndim: 1, required: true }
-          elevation:        { dtype: float32, ndim: 1, required: true }
-          azimuth:          { dtype: float32, ndim: 1, required: true }
-          pamb:             { dtype: float32, ndim: 1, required: true }
-          tamb:             { dtype: float32, ndim: 1, required: true }
-          tsky:             { dtype: float32, ndim: 1, required: true, const: TSKY_L0 }  # L0 sky temp; ≠ L1 t_sky
-          signal_freq:      { dtype: float64, ndim: 1, required: true }
-          image_freq:       { dtype: float64, ndim: 1, required: true }
-          freq_res:         { dtype: float64, ndim: 1, required: true }
-          freq_off:         { dtype: float64, ndim: 1, required: true }
-          ref_channel:      { dtype: float32, ndim: 1, required: true }
-          lloadsn:          { dtype: int32,   ndim: 1, required: true }
+          mjd:              { dtype: float64, ndim: 1, dims: [subscan], units: d, required: true }
+          exptime:          { dtype: float32, ndim: 1, dims: [subscan], units: s, required: true }
+          elevation:        { dtype: float32, ndim: 1, dims: [subscan], units: rad, required: true }
+          azimuth:          { dtype: float32, ndim: 1, dims: [subscan], units: rad, required: true }
+          pamb:             { dtype: float32, ndim: 1, dims: [subscan], units: Torr, required: true }
+          tamb:             { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true }
+          tsky:             { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true, const: TSKY_L0 }  # L0 sky temp; ≠ L1 t_sky
+          signal_freq:      { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          image_freq:       { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          freq_res:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          freq_off:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          ref_channel:      { dtype: float32, ndim: 1, dims: [subscan], required: true }
+          lloadsn:          { dtype: int32,   ndim: 1, dims: [subscan], required: true }
           # String arrays (the str_array per-language seam): zarr v3 `string`, 1D [S].
-          sobsmode:         { dtype: string,  ndim: 1, required: true }
-          frontend_backends: { dtype: string, ndim: 1, required: true }
-          raw_fits_headers: { dtype: string,  ndim: 1, required: true }
-          instmode_subscan: { dtype: string,  ndim: 1, required: true }
-          nod_beam:         { dtype: string,  ndim: 1, required: true }
-          chop_freq:        { dtype: float32, ndim: 1, required: true, const: CHOP_FREQ_COORD }
+          sobsmode:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          frontend_backends: { dtype: string, ndim: 1, dims: [subscan], required: true }
+          raw_fits_headers: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
           # Source-only geometry: OTF scan track [D,S] and per-pixel offsets [R,A,S].
           # Always written in the `is_source` branch (writer.rs:536-593) → required.
-          otf_lon:          { dtype: float64, ndim: 2, required: true }
-          otf_lat:          { dtype: float64, ndim: 2, required: true }
-          pixel_offset_lon: { dtype: float64, ndim: 3, required: true }
-          pixel_offset_lat: { dtype: float64, ndim: 3, required: true }
+          otf_lon:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: true }
+          otf_lat:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: true }
+          pixel_offset_lon: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: true }
+          pixel_offset_lat: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: true }
           # Per-channel load-temperature tables [C,1,R,A,S]. Only written when a
           # record carries a FITS LOAD_TEMP_ARRAY (HFA HOT/COLD) → required:false.
-          load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
-          load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
+          # The load temperature is constant across dumps: axis `load_dump` has
+          # length 1 and is not the `dump` axis of data_5d.
+          load_temp_sig_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
+          load_temp_img_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
           # Valid dump count per subscan [S] (#20): zarr-fits pads the dump axis
           # D of each subscan to the longest subscan; dumps 0..n-1 of subscan s
           # hold data, the rest is fill. Absent ⇒ a reader takes every dump.
-          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
+          # A count of dumps: no units attr.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, dims: [subscan], required: false }
       calibration:              # → const CALIBRATION_GROUP
-        # L0 obs sub-group: arrays under scan_<N>/calibration/ (inline:false).
-        placement: scan
+        # L0 obs sub-group: arrays under scan_<N>/calibration/, or
+        # scan_<N>/band_<B>/calibration/ when multi-frontend (inline:false).
+        placement: scan_or_band
         inline: false
         arrays:
-          data_5d:          { dtype: int32,   ndim: 5, required: true }
-          mjd:              { dtype: float64, ndim: 1, required: true }
-          exptime:          { dtype: float32, ndim: 1, required: true }
-          elevation:        { dtype: float32, ndim: 1, required: true }
-          azimuth:          { dtype: float32, ndim: 1, required: true }
-          pamb:             { dtype: float32, ndim: 1, required: true }
-          tamb:             { dtype: float32, ndim: 1, required: true }
-          tsky:             { dtype: float32, ndim: 1, required: true, const: TSKY_L0 }
-          thot:             { dtype: float32, ndim: 1, required: true }   # calibration only
-          tcold:            { dtype: float32, ndim: 1, required: true }   # calibration only
-          lloadsn:          { dtype: int32,   ndim: 1, required: true }
-          signal_freq:      { dtype: float64, ndim: 1, required: true }
-          image_freq:       { dtype: float64, ndim: 1, required: true }
-          freq_res:         { dtype: float64, ndim: 1, required: true }
-          freq_off:         { dtype: float64, ndim: 1, required: true }
-          ref_channel:      { dtype: float32, ndim: 1, required: true }
-          sobsmode:         { dtype: string,  ndim: 1, required: true }
-          frontend_backends: { dtype: string, ndim: 1, required: true }
-          raw_fits_headers: { dtype: string,  ndim: 1, required: true }
-          instmode_subscan: { dtype: string,  ndim: 1, required: true }
-          nod_beam:         { dtype: string,  ndim: 1, required: true }
-          chop_freq:        { dtype: float32, ndim: 1, required: true, const: CHOP_FREQ_COORD }
+          data_5d:          { dtype: int32,   ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true }
+          mjd:              { dtype: float64, ndim: 1, dims: [subscan], units: d, required: true }
+          exptime:          { dtype: float32, ndim: 1, dims: [subscan], units: s, required: true }
+          elevation:        { dtype: float32, ndim: 1, dims: [subscan], units: rad, required: true }
+          azimuth:          { dtype: float32, ndim: 1, dims: [subscan], units: rad, required: true }
+          pamb:             { dtype: float32, ndim: 1, dims: [subscan], units: Torr, required: true }
+          tamb:             { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true }
+          tsky:             { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true, const: TSKY_L0 }
+          thot:             { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true }   # calibration only
+          tcold:            { dtype: float32, ndim: 1, dims: [subscan], units: K, required: true }   # calibration only
+          lloadsn:          { dtype: int32,   ndim: 1, dims: [subscan], required: true }
+          signal_freq:      { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          image_freq:       { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          freq_res:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          freq_off:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
+          ref_channel:      { dtype: float32, ndim: 1, dims: [subscan], required: true }
+          sobsmode:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          frontend_backends: { dtype: string, ndim: 1, dims: [subscan], required: true }
+          raw_fits_headers: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
           # Load-temperature tables, calibration variant. No otf_*/pixel_offset_*
           # here (the writer's geometry block is source-only). Conditional → false.
-          load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
-          load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
-          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }   # [S], as in source
+          load_temp_sig_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
+          load_temp_img_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
+          n_valid_dumps:    { dtype: int32,   ndim: 1, dims: [subscan], required: false }   # [S], as in source
   L1:
     # A store is L1 iff its root group carries this attr (slice-4 detection).
     detect: cal_schema_version
@@ -268,28 +307,54 @@ levels:
     # (cal_schema_version itself is negotiated via the `versions` section.)
     root_attrs:
       cal_engine_version: { type: string, required: true }
-    # Per-scan-group attrs (calibrated.rs:185-305). The first block is written
-    # unconditionally on every scan group; mjd is guarded (finite & >0),
-    # provenance keys only land when a Provenance is supplied, and the verbatim
-    # L0 identity passthrough is store-dependent → all required:false.
+    # Per-scan-group attrs (calibrated.rs:185-305): what all bands of a scan
+    # share. mjd is guarded (finite & >0) and the verbatim L0 identity
+    # passthrough is store-dependent → required:false.
     scan_attrs:
       scan_number:          { type: integer, required: true }
       source:               { type: string,  required: true }
       instmode:             { type: string,  required: true }
       raw_instmode:         { type: string,  required: true }
-      vlsr_source:          { type: number,  required: true }
-      pwv_mm:               { type: number,  required: true }
-      eta_fss:              { type: number,  required: true }
-      eta_mb:               { type: number,  required: true }
-      gain_el_correction:   { type: number,  required: true }
       cal_strategy:         { type: string,  required: true }
       ref_strategy:         { type: string,  required: true }
-      arrays:               { type: array,   required: true }
-      pixels_per_array:     { type: array,   required: true }
       cal_scan_numbers:     { type: array,   required: true }
       lloadsn:              { type: array,   required: true }
-      qa:                   { type: object,  required: true }
       mjd:                  { type: number,  required: false }
+      mission_id:           { type: string,  required: false }
+      obs_id:               { type: string,  required: false }
+      aor_id:               { type: string,  required: false }
+      date_obs:             { type: string,  required: false }
+      telescope:            { type: string,  required: false }
+      # Observatory location (#19), forwarded from the L0 root. An airborne
+      # observatory writes the not-applicable sentinel here and its position
+      # per subscan in the platform_* arrays.
+      site_longitude_deg:   { type: number,  required: true, sentinel: true }
+      site_latitude_deg:    { type: number,  required: true, sentinel: true }
+      site_altitude_m:      { type: number,  required: true, sentinel: true }
+    # Per-band-group attrs (multi-frontend only; calibrated.rs:317-341).
+    band_attrs:
+      band_index:       { type: integer, required: true }
+    # Attrs of one calibration: at the scan group when single-frontend, at each
+    # band group when multi-frontend (#19: identity, quality record, provenance
+    # and the frame set). In a multi-frontend scan the scan group holds none of
+    # them: a scan-or-band attr on that scan group is an error (one value for
+    # all bands would be the last band's).
+    scan_or_band_attrs:
+      line:         { type: string,  required: true }
+      rest_freq_hz: { type: number,  required: true }
+      # Completeness marker, written last (calibrated.rs:544-549).
+      l1_complete:  { type: boolean, required: true, equals: true }
+      # Identity, forwarded from L0 (ADR-0007); required since L1 2.0.
+      arrays:           { type: array,   required: true }
+      pixels_per_array: { type: array,   required: true }
+      frontend:         { type: string,  required: true }
+      # Verbatim source-keyword provenance forwarded from L0. Top-level object
+      # type-checked only.
+      raw_attrs:        { type: object,  required: true }
+      # Quality record.
+      qa:               { type: object,  required: true }
+      pwv_mm:           { type: number,  required: true }
+      # Provenance: lands only when a Provenance is supplied → required:false.
       cal_hash:             { type: string,  required: false }
       # The L0 store this L1 store was calibrated from (#20): an RFC 3986 URI
       # reference — an absolute URI (s3://bucket/x.zarr) or a relative reference
@@ -305,33 +370,28 @@ levels:
       atm_table_info:       { type: object,  required: false }
       processing_steps:     { type: object,  required: false }
       linked_pwv_source:    { type: object,  required: false }
-      mission_id:           { type: string,  required: false }
-      obs_id:               { type: string,  required: false }
-      aor_id:               { type: string,  required: false }
-      date_obs:             { type: string,  required: false }
-      telescope:            { type: string,  required: false }
-    # Per-band-group attrs (multi-frontend only; calibrated.rs:317-341). band_index,
-    # arrays, pixels_per_array are unconditional on each band. (`frontend` was a
-    # band attr; it is now a scan_or_band attr so single-frontend stores carry it
-    # at the scan group too — identity is forwarded everywhere, not band-only.)
-    band_attrs:
-      band_index:       { type: integer, required: true }
-      arrays:           { type: array,   required: true }
-      pixels_per_array: { type: array,   required: true }
-    # Attrs that sit at the scan group when single-frontend and at each band group
-    # when multi-frontend (line/rest_freq_hz: calibrated.rs:255-264 vs 322-327).
-    # l1_complete is written last as the completeness marker (calibrated.rs:544-549).
-    # `frontend` (L0-forwarded identity) is checked at the scan group for a
-    # single-frontend store and at each band for multi-frontend; required:false
-    # (guarded by `if !arrays.is_empty()` on the writer side).
-    scan_or_band_attrs:
-      line:         { type: string,  required: true }
-      rest_freq_hz: { type: number,  required: true }
-      l1_complete:  { type: boolean, required: true, equals: true }
-      frontend:     { type: string,  required: false }
-      # Verbatim source-keyword provenance forwarded from L0 (calibrated.rs writes
-      # it per band in multi-frontend stores). Top-level object type-checked only.
-      raw_attrs:    { type: object,  required: false }
+      # ── Scientific frame (#19; the names await maintainer approval) ──
+      # A required frame field is always present; `sentinel: true` marks one that
+      # may not apply.
+      # Spectral. TODO(#19): the channel-to-frequency formula (the base of the
+      # L0 ref_channel and the role of freq_off) awaits the science review.
+      specsys:           { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of signal_freqs/image_freqs (FITS SPECSYS)
+      veldef:            { type: string,  required: true, sentinel: true, enum: [RADIO, OPTICAL, RELATIVISTIC] }   # velocity convention (FITS VELDEF)
+      vlsr_source:       { type: number,  required: true, sentinel: true }   # systemic velocity of the source, km/s (legacy name, no unit suffix)
+      vlsr_source_frame: { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of vlsr_source (SPECSYS vocabulary)
+      ref_channel_base:  { type: integer, required: true, enum: [0, 1] }   # base (0 or 1) of the L0 ref_channel
+      # Position: the reference position is the ref_lon/ref_lat arrays.
+      coord_frame:       { type: string,  required: true, sentinel: true, enum: [ICRS, FK5, FK4, GALACTIC, AZEL] }   # frame of ref_lon/ref_lat and the offsets
+      equinox:           { type: number,  required: true, sentinel: true }   # epoch of an FK4/FK5 frame (FITS EQUINOX)
+      projection:        { type: string,  required: true, sentinel: true, enum: [SFL, GLS, TAN, SIN, ARC, CAR] }   # FITS projection code of the offsets
+      offset_convention: { type: string,  required: true, sentinel: true, enum: [equatorial_cosdec, equatorial_coord, horizontal] }   # how otf_* and pixel_offset_* offsets are formed
+      # Intensity.
+      temperature_scale: { type: string,  required: true, sentinel: true, enum: ["TA*", TMB, "TR*", TB] }   # intensity scale of spectra
+      eta_fss:           { type: number,  required: true }   # forward efficiency calibrate applied (eta_f; legacy name)
+      eta_mb:            { type: number,  required: true, sentinel: true }   # main-beam efficiency
+      gain_el_correction: { type: number, required: true }   # gain-elevation correction calibrate applied
+      sideband_mode:     { type: string,  required: true, sentinel: true, enum: [SSB, DSB, USB, LSB] }   # receiver sideband mode
+      image_sideband_fraction: { type: number, required: true, sentinel: true }  # image share of the total gain calibrate applied (gain_image); signal share = 1 - it
     groups:
       # The L1 main arrays sit directly under the scan group (single-frontend) or
       # each band sub-group (multi-frontend) — placement scan_or_band, inline:true
@@ -341,37 +401,46 @@ levels:
         placement: scan_or_band
         inline: true
         arrays:
-          # Always written (calibrated.rs:358-476).
+          # Always written (calibrated.rs:358-476). Every array with a `subscan`
+          # axis shares the subscan axis of spectra: the ON subscans only.
           # spectra and t_sys take float64 (calibrate today) or float32
           # (kalibrate#93): a dtype set (#20). A writer that rounds the mantissa
           # (bit rounding) records the kept mantissa bits in the array attr
           # `keepbits`; absent ⇒ no rounding.
-          spectra:      { dtype: [float64, float32], ndim: 5, required: true, attrs: { keepbits: { type: integer, required: false } } }   # calibrated T; C,D,R,A,S
-          t_sys:        { dtype: [float64, float32], ndim: 4, required: true, attrs: { keepbits: { type: integer, required: false } } }   # C,R,A,S
-          t_int:        { dtype: float64, ndim: 1, required: true }   # [S]
-          t_off:        { dtype: float64, ndim: 1, required: true }   # [S] OFF integ time
-          t_rec_ssb:    { dtype: float64, ndim: 3, required: true }   # C,R,A
-          gamma:        { dtype: float64, ndim: 3, required: true }
-          tau_signal:   { dtype: float64, ndim: 1, required: true }   # [C] zenith
-          tau_image:    { dtype: float64, ndim: 1, required: true }
-          t_sky:        { dtype: float64, ndim: 3, required: true }   # C,R,A; ≠ L0 tsky
-          s_h_obs:      { dtype: float64, ndim: 1, required: true }   # [C] observed sky-hot
-          t_sky_fit:    { dtype: float64, ndim: 1, required: true }   # [C] ATM-model sky
-          t_cal:        { dtype: float64, ndim: 1, required: true }   # [C] cal factor (t_cal_1d)
-          flags:        { dtype: uint16,  ndim: 5, required: true }
-          signal_freqs: { dtype: float64, ndim: 1, required: true }
-          image_freqs:  { dtype: float64, ndim: 1, required: true }
+          spectra:      { dtype: [float64, float32], ndim: 5, dims: [channel, dump, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false } } }   # calibrated T; C,D,R,A,S
+          t_sys:        { dtype: [float64, float32], ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false } } }   # C,R,A,S
+          t_int:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S]
+          t_off:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] OFF integ time
+          t_rec_ssb:    { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A
+          gamma:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: ct/K, required: true }
+          tau_signal:   { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, signal sideband
+          tau_image:    { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, image sideband
+          t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky
+          s_h_obs:      { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] observed sky-hot
+          t_sky_fit:    { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] ATM-model sky
+          t_cal:        { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] cal factor (t_cal_1d)
+          flags:        { dtype: uint16,  ndim: 5, dims: [channel, dump, receiver, array, subscan], required: true }
+          signal_freqs: { dtype: float64, ndim: 1, dims: [channel], units: Hz, required: true }
+          image_freqs:  { dtype: float64, ndim: 1, dims: [channel], units: Hz, required: true }
           # Conditional (calibrated.rs:478-537): lloadsn skipped when empty; OTF
           # and pixel-offset arrays are Option and only present for OTF/mapping.
-          lloadsn:          { dtype: int32,   ndim: 1, required: false }
-          otf_lon:          { dtype: float64, ndim: 2, required: false }
-          otf_lat:          { dtype: float64, ndim: 2, required: false }
-          otf_airmass:      { dtype: float64, ndim: 2, required: false }
-          pixel_offset_lon: { dtype: float64, ndim: 3, required: false }
-          pixel_offset_lat: { dtype: float64, ndim: 3, required: false }
+          lloadsn:          { dtype: int32,   ndim: 1, dims: [subscan], required: false }
+          otf_lon:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: false }
+          otf_lat:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: false }
+          otf_airmass:      { dtype: float64, ndim: 2, dims: [dump, subscan], units: "", required: false }
+          pixel_offset_lon: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: false }
+          pixel_offset_lat: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: false }
           # Valid dump count per subscan [S] (#20): spectra keeps the padded D
-          # axis of L0, so the L0 count carries over.
-          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
+          # axis of L0, so the L0 count carries over. A count of dumps: no units.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, dims: [subscan], required: false }
+          # Scientific frame (#19), per ON subscan (the subscan axis of spectra).
+          # NaN fill = not applicable.
+          v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # Doppler velocity of the frame (FITS VFRAME)
+          ref_lon:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # reference position, in coord_frame
+          ref_lat:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }
+          platform_lon: { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # position of an airborne observatory
+          platform_lat: { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }
+          platform_alt: { dtype: float64, ndim: 1, dims: [subscan], units: m, required: true }
       skydiff:                  # → const SKYDIFF_GROUP
         # Diagnostic sub-group under the scan/band group (diagnostic modes only).
         placement: scan_or_band
@@ -379,13 +448,13 @@ levels:
         arrays:
           # On disk: spectrum_<h>, matched as the `spectrum_` family (every array
           # whose name starts with the prefix). The const is the "spectrum" stem.
-          spectrum:     { dtype: float64, ndim: 3, required: false, prefix: spectrum_, const: SKYDIFF_SPECTRUM }
+          spectrum:     { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: false, prefix: spectrum_, const: SKYDIFF_SPECTRUM }
       skychopdiff:             # → const SKYCHOPDIFF_GROUP
         placement: scan_or_band
         inline: false
         arrays:
           # On disk: spectrum_<on>_<j>, matched as the `spectrum_` family.
-          spectrum:     { dtype: float64, ndim: 3, required: false, prefix: spectrum_, const: SKYCHOPDIFF_SPECTRUM }
+          spectrum:     { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: false, prefix: spectrum_, const: SKYCHOPDIFF_SPECTRUM }
 
 # Ordered name lists → `pub const … : &[&str]` (membership/routing; exact order).
 lists:
@@ -398,8 +467,23 @@ lists:
 
 # Single attribute-name constants → `pub const … : &str`.
 markers:
-  L0_COMPLETE_ATTR: l0_complete   # written last on an L0 scan group; absence ⇒ untrusted
+  L0_COMPLETE_ATTR: l0_complete   # written last on an L0 scan/band group; absence ⇒ untrusted
   L1_COMPLETE_ATTR: l1_complete   # written last on an L1 scan/band group; absence ⇒ untrusted
+
+# Bit table of the L1 `flags` array (uint16): key = const identifier, value =
+# bit index → `pub const NAME: u16 = 1 << bit` (Python: an int of the same
+# value). A datum is good when flags == 0. Bits 0-1 are set by calibrate, bits
+# 2-7 downstream; bits 8-15 are reserved. Bit 5 is ELEVATION_LOW, as calibrate
+# (cal-core/src/flags.rs) and YODA (io/flags.py) write it.
+flag_bits:
+  BAD_CHANNEL: 0      # calibrate: bad channel (hot <= cold, t_rec out of range)
+  FILL_VALUE: 1       # calibrate: raw data missing (fill value)
+  SPIKE: 2            # reduction: spike
+  RFI: 3              # reduction: radio-frequency interference
+  TSYS_OUTLIER: 4     # reduction: t_sys outside its threshold
+  ELEVATION_LOW: 5    # reduction: low elevation
+  ML_FLAGGED: 6       # reduction: flagged by a machine-learning model
+  MANUAL: 7           # reduction: flagged by hand
 
 # Validator-only spec data (generates NO Rust const): for each canonical
 # attribute, the ordered list of source FITS keywords it may be resolved from,

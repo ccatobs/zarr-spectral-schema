@@ -38,7 +38,10 @@ import fsspec
 @dataclass
 class ArrayView:
     dtype: str
-    shape: list[int]
+    # list of non-negative integers, or None when the metadata holds anything else
+    shape: list[int] | None
+    # zarr v3 `dimension_names` as parsed (None when absent or null)
+    dimension_names: Any = None
     attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -113,10 +116,10 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
         if meta is None:
             continue
         if meta.get("node_type") == "array":
-            shape = meta.get("shape")
             view.arrays[child] = ArrayView(
                 dtype=_dtype_name(meta.get("data_type")),
-                shape=shape if isinstance(shape, list) else [],
+                shape=_shape(meta.get("shape")),
+                dimension_names=meta.get("dimension_names"),
                 attrs=_attributes(meta),
             )
         elif meta.get("node_type") == "group":
@@ -165,6 +168,15 @@ def _finite_float(text: str) -> float:
     if not math.isfinite(value):
         raise ValueError(f"number out of range: {text}")
     return value
+
+
+def _shape(shape: Any) -> list[int] | None:
+    """A list of non-negative integers below 2**64 (what serde_json reads as
+    u64), else None. bool is no integer here."""
+    ok = isinstance(shape, list) and all(
+        isinstance(n, int) and not isinstance(n, bool) and 0 <= n < 1 << 64 for n in shape
+    )
+    return shape if ok else None
 
 
 def _attributes(meta: dict[str, Any]) -> dict[str, Any]:

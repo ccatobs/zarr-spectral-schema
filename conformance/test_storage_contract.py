@@ -127,7 +127,11 @@ def test_unlistable_local_group_is_an_error(tmp_path):
     store = generate.emit_l1_single(
         tmp_path / "l1_bad_skydiff.zarr",
         array_overrides={
-            "scan_000001/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}
+            "scan_000001/skydiff/spectrum_0": {
+                "dtype": "float32",
+                "ndim": 2,
+                "dims": ["channel", "receiver"],
+            }
         },
     )
     skydiff = store / "scan_000001" / "skydiff"

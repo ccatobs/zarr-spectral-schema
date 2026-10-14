@@ -16,9 +16,13 @@ Three checks today:
   ``skydiff``/``skychopdiff`` sub-groups are all resolved by the same generic
   walk — never hand-branched per field. The spec's ``one_of`` (exactly one of
   these groups per target), ``equals`` (attr value constraint), ``format``
-  (``uri-reference``), ``prefix`` (array family), dtype sets and array ``attrs``
-  are interpreted the same way. Every structure finding
-  starts with ``[<level>] ``; version and level-detection errors do not.
+  (``uri-reference``), ``enum`` (value set), ``sentinel`` (not-applicable
+  value), ``prefix`` (array family), dtype sets and array ``attrs`` are
+  interpreted the same way. Each array's ``dimension_names`` and ``units`` attr
+  are checked against its ``dims``/``units``; arrays at one target agree on the
+  length of each shared dimension; a multi-frontend scan group holds no
+  scan-or-band attr. Every structure finding starts with ``[<level>] ``; version
+  and level-detection errors do not.
 * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
   (``l0_schema_version`` integer, ``cal_schema_version`` ``major.minor``) is
   range-checked against the spec's supported window (``min_supported`` ..
@@ -40,9 +44,9 @@ from pathlib import Path
 from ._spec import load_spec
 from ._store import StoreView, read_store
 
-# Scan groups are ``scan_<6+ digits>`` (writer: ``scan_{:06}``; frontend b of scan
-# N is ``scan_<N + 1000000·b>``); band sub-groups are ``band_<index>`` (writer:
-# ``band_{band_index}``, base-0, no zero-pad). ASCII digits only, whole name
+# Scan groups are ``scan_<6+ digits>`` (writer: ``scan_{:06}``); band sub-groups
+# are ``band_<index>`` (writer: ``band_{band_index}``, base-0, no zero-pad), at L0
+# and L1 alike. ASCII digits only, whole name
 # (fullmatch), so both bindings accept the same names.
 _SCAN_PATTERN = "^scan_[0-9]{6,}$"
 _SCAN_RE = re.compile(_SCAN_PATTERN)
@@ -51,6 +55,9 @@ _VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
 # RFC 3986 URI reference (ASCII; a % starts a two-hex-digit escape); a leading
 # "/" (absolute path) is excluded: it names a file on one host only.
 _URI_REFERENCE_RE = re.compile(r"(?!/)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+")
+
+# Spec sections are walked in sorted key order, as the Rust binding's BTreeMaps
+# are, so both bindings report the same findings in the same order.
 
 # Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
 # `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
@@ -62,6 +69,11 @@ _TYPE_CHECKS = {
     "array": lambda v: isinstance(v, list),
     "object": lambda v: isinstance(v, dict),
 }
+
+
+def _sentinel(attr_type: str) -> str | None:
+    """The not-applicable sentinel of an attr type: "NONE" or JSON null."""
+    return "NONE" if attr_type == "string" else None
 
 
 @dataclass
@@ -178,13 +190,22 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
             result,
         )
 
-        # Multi-frontend: per-band attrs on each band group.
+        # Multi-frontend: per-band attrs on each band group, and no scan-or-band
+        # attr on the scan group (it belongs on each band).
         for b in bands:
             _check_attrs(view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result)
+        for name in sorted(level.get("scan_or_band_attrs", {})) if bands else ():
+            if name in view.group_attrs[sg]:
+                result.errors.append(
+                    f"[{level_name}] attribute '{name}' at '{sg}' belongs on each band "
+                    "of a multi-frontend scan, not on the scan group"
+                )
 
         # `scan` placement resolves to the scan group; `scan_or_band` to the
         # scan group (single-frontend) or each band (multi-frontend).
         targets = {"scan": [sg], "scan_or_band": bands or [sg]}
+        # (path, dims, shape) of each array checked, per target.
+        seen: dict[str, list[tuple[str, list[str], list[int]]]] = {}
         for t in targets["scan_or_band"]:
             _check_attrs(
                 view.group_attrs[t],
@@ -194,7 +215,7 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                 result,
             )
         for placement, where in targets.items():
-            placed = {n: g for n, g in groups.items() if g.get("placement") == placement}
+            placed = {n: g for n, g in sorted(groups.items()) if g.get("placement") == placement}
             one_of = [n for n in level.get("one_of", []) if n in placed]
             for t in where:
                 present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
@@ -205,7 +226,11 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                 for gname, group in placed.items():
                     if gname in one_of and gname not in present:
                         continue
-                    _check_group_arrays(view, t, gname, group, level_name, result)
+                    _check_group_arrays(
+                        view, t, gname, group, level_name, result, seen.setdefault(t, [])
+                    )
+        for t, arrays in sorted(seen.items()):
+            _check_shared_dims(t, arrays, level_name, result)
 
 
 def _check_group_arrays(
@@ -215,6 +240,7 @@ def _check_group_arrays(
     group: dict,
     level_name: str,
     result: ValidationResult,
+    seen: list[tuple[str, list[str], list[int]]],
 ) -> None:
     """Check one group's arrays under ``base``.
 
@@ -225,9 +251,9 @@ def _check_group_arrays(
     """
     inline = group.get("inline", False)
     prefix = base if inline else f"{base}/{group_name}"
-    for array_name, aspec in group.get("arrays", {}).items():
+    for array_name, aspec in sorted(group.get("arrays", {}).items()):
         if "prefix" not in aspec:
-            _check_array(view, f"{prefix}/{array_name}", aspec, level_name, result)
+            _check_array(view, f"{prefix}/{array_name}", aspec, level_name, result, seen)
             continue
         start = f"{prefix}/{aspec['prefix']}"
         members = sorted(
@@ -238,13 +264,20 @@ def _check_group_arrays(
         if not members and aspec.get("required", False):
             result.errors.append(f"[{level_name}] required array family '{start}*' is missing")
         for rel in members:
-            _check_array(view, rel, aspec, level_name, result)
+            _check_array(view, rel, aspec, level_name, result, seen)
 
 
 def _check_array(
-    view: StoreView, rel: str, aspec: dict, level_name: str, result: ValidationResult
+    view: StoreView,
+    rel: str,
+    aspec: dict,
+    level_name: str,
+    result: ValidationResult,
+    seen: list[tuple[str, list[str], list[int]]],
 ) -> None:
-    """Check one array path: node type, presence (if required), dtype, ndim, attrs."""
+    """Check one array path: node type, presence (if required), dtype, ndim,
+    ``dimension_names`` against the spec's ``dims``, the ``units`` attr and the
+    array's own ``attrs``."""
     if rel in view.group_attrs:
         result.errors.append(f"[{level_name}] '{rel}' is a group, expected an array")
         return
@@ -258,11 +291,60 @@ def _check_array(
         result.errors.append(
             f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )
-    if arr.ndim != aspec["ndim"]:
+    if arr.shape is None:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' shape is not a list of non-negative integers"
+        )
+    elif arr.ndim != aspec["ndim"]:
         result.errors.append(
             f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
         )
+    elif arr.ndim == len(aspec["dims"]):
+        seen.append((rel, aspec["dims"], arr.shape))
+    dims = json.dumps(aspec["dims"])
+    if arr.dimension_names is None:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' has no dimension_names (expected {dims})"
+        )
+    elif arr.dimension_names != aspec["dims"]:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' dimension_names "
+            f"{json.dumps(arr.dimension_names)} != expected {dims}"
+        )
+    if "units" in aspec:
+        units = json.dumps(aspec["units"])
+        if "units" not in arr.attrs:
+            result.errors.append(
+                f"[{level_name}] array '{rel}' has no units attr (expected {units})"
+            )
+        elif arr.attrs["units"] != aspec["units"]:
+            result.errors.append(
+                f"[{level_name}] array '{rel}' units {json.dumps(arr.attrs['units'])} "
+                f"!= expected {units}"
+            )
     _check_attrs(arr.attrs, aspec.get("attrs", {}), rel, level_name, result)
+
+
+def _check_shared_dims(
+    target: str,
+    arrays: list[tuple[str, list[str], list[int]]],
+    level_name: str,
+    result: ValidationResult,
+) -> None:
+    """Arrays at one target that share an axis name agree on its length."""
+    lengths: dict[str, dict[int, list[str]]] = {}
+    for rel, dims, shape in arrays:
+        for dim, n in zip(dims, shape):
+            lengths.setdefault(dim, {}).setdefault(n, []).append(rel[len(target) + 1 :])
+    for dim in sorted(lengths):
+        if len(lengths[dim]) > 1:
+            parts = "; ".join(
+                f"{n} in [{', '.join(sorted(names))}]" for n, names in sorted(lengths[dim].items())
+            )
+            result.errors.append(
+                f"[{level_name}] arrays at '{target}' disagree on the length of "
+                f"dimension '{dim}': {parts}"
+            )
 
 
 def _check_attrs(
@@ -275,11 +357,13 @@ def _check_attrs(
     """Check declared attrs at one placement location.
 
     Required attrs must be present and (if present) type-checked; optional attrs
-    are type-checked only when present. An ``equals`` value constraint and a
-    ``format`` are checked after the type. ``where`` is the store path used in
+    are type-checked only when present. An attr with ``sentinel: true`` may hold
+    the not-applicable sentinel instead. An ``enum`` value set, an ``equals``
+    value constraint and a ``format`` are checked after the type. ``where`` is
+    the store path used in
     messages (``root`` or a group path) so failures point at the exact location.
     """
-    for name, aspec in declared.items():
+    for name, aspec in sorted(declared.items()):
         present = name in attrs
         if not present:
             if aspec.get("required", False):
@@ -288,11 +372,18 @@ def _check_attrs(
                 )
             continue
         expected = aspec["type"]
+        if aspec.get("sentinel") and attrs[name] == _sentinel(expected):
+            continue
         checker = _TYPE_CHECKS.get(expected)
         if checker is not None and not checker(attrs[name]):
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be of type "
                 f"{expected!r}, got {attrs[name]!r}"
+            )
+        elif "enum" in aspec and attrs[name] not in aspec["enum"]:
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must be one of "
+                f"{json.dumps(aspec['enum'])}, got {json.dumps(attrs[name])}"
             )
         elif "equals" in aspec and attrs[name] != aspec["equals"]:
             # JSON rendering keeps the message identical to the Rust binding's.
