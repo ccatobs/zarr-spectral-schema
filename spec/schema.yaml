@@ -219,11 +219,11 @@ levels:
       mjd:                  { type: number,  required: false }
       cal_hash:             { type: string,  required: false }
       source_l0_store:      { type: string,  required: false }
-      source_l0_scans:      { type: array,   required: false }
+      source_l0_scans:      { type: object,  required: false }
       cal_config:           { type: object,  required: false }
       processing_timestamp: { type: string,  required: false }
       atm_table_info:       { type: object,  required: false }
-      processing_steps:     { type: array,   required: false }
+      processing_steps:     { type: object,  required: false }
       linked_pwv_source:    { type: object,  required: false }
       mission_id:           { type: string,  required: false }
       obs_id:               { type: string,  required: false }

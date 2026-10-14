@@ -192,11 +192,14 @@ def emit_l1_single(
     omit: set[str] | None = None,
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
+    scan_attr_overrides: dict | None = None,
 ) -> Path:
     """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
 
     ``versions`` overrides the on-disk ``cal_schema_version`` for the
     version-negotiation fixtures while the structure stays spec-current.
+    ``scan_attr_overrides`` substitutes literal values for scan-group attrs
+    (``scan_attrs`` and ``scan_or_band_attrs`` both land on the scan group).
     """
     omit = omit or set()
     omit_attrs = omit_attrs or set()
@@ -210,10 +213,14 @@ def emit_l1_single(
     scan = root.require_group(_SCAN)
     # No band_<M> children ⇒ single-frontend: scan_attrs + scan_or_band_attrs
     # both land on the scan group.
-    _write_attrs(scan, level.get("scan_attrs", {}), omit_attrs, emit_optional=True)
-    _write_attrs(
-        scan, level.get("scan_or_band_attrs", {}), omit_attrs, emit_optional=True
-    )
+    for section in ("scan_attrs", "scan_or_band_attrs"):
+        _write_attrs(
+            scan,
+            level.get(section, {}),
+            omit_attrs,
+            emit_optional=True,
+            overrides=scan_attr_overrides,
+        )
 
     for gname, gspec in level.get("groups", {}).items():
         if gspec.get("placement") != "scan_or_band":
@@ -329,6 +336,14 @@ def emit_real_output_fixtures(out: Path) -> None:
     # A scan holds exactly one of the one_of groups: both, or neither, is an error.
     emit_l0(out / "l0_both_groups.zarr", scans={_SCAN: list(one_of)})
     emit_l0(out / "l0_no_group.zarr", scans={_SCAN: []})
+    # calibrate writes the provenance attrs as JSON objects.
+    emit_l1_single(
+        out / "l1_provenance_objects.zarr",
+        scan_attr_overrides={
+            "source_l0_scans": {"source_scan": 1, "cal_scan": 2},
+            "processing_steps": {"skydiff": False, "obs_mode": "TotalPower"},
+        },
+    )
 
 
 def main() -> None:

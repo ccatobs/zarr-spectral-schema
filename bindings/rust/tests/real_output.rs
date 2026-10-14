@@ -53,3 +53,10 @@ fn scan_with_both_or_neither_group_is_rejected() {
         );
     }
 }
+
+#[test]
+fn provenance_attrs_as_objects_are_green() {
+    // calibrate writes source_l0_scans and processing_steps as JSON objects.
+    let e = errors("l1_provenance_objects.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}

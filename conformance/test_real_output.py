@@ -45,3 +45,12 @@ def test_scan_with_only_source_or_only_calibration_is_green(stores):
 def test_scan_with_both_or_neither_group_is_rejected(stores, name):
     errors = zss.validate(stores / name)
     assert any("scan_000001" in e and "exactly one of" in e for e in errors), errors
+
+
+def test_provenance_attrs_as_objects_are_green(stores):
+    # calibrate writes source_l0_scans and processing_steps as JSON objects.
+    view = zss._store.read_store(stores / "l1_provenance_objects.zarr")  # type: ignore[attr-defined]
+    scan = view.group_attrs["scan_000001"]
+    assert isinstance(scan["source_l0_scans"], dict)
+    assert isinstance(scan["processing_steps"], dict)
+    assert zss.validate(stores / "l1_provenance_objects.zarr") == []
