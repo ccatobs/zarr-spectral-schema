@@ -83,7 +83,8 @@ def test_validator_reads_only_zarr_json_objects(s3):
 
 # ── an unreadable node is an error, never a silent gap or an exception ─────
 
-# (store, object key or listing prefix answered with 403, expected errors)
+# (store, object key or listing prefix answered with 403, expected errors);
+# the same cases as DENY_CASES in bindings/rust/tests/object_storage.rs.
 DENY_CASES = [
     (
         "l1_bad_skydiff.zarr",
@@ -91,13 +92,11 @@ DENY_CASES = [
         ["[L1] 'scan_000001/skydiff/': cannot list"],
     ),
     (
-        "l1_bad_skydiff.zarr",
-        "l1_bad_skydiff.zarr/scan_000001/t_int/zarr.json",
+        "l1_single.zarr",
+        "l1_single.zarr/scan_000001/t_int/zarr.json",
         [
             "[L1] 'scan_000001/t_int/zarr.json': cannot read metadata",
             "[L1] required array 'scan_000001/t_int' is missing",
-            "[L1] array 'scan_000001/skydiff/spectrum_0' dtype 'float32' != expected 'float64'",
-            "[L1] array 'scan_000001/skydiff/spectrum_0' ndim 2 != expected 3",
         ],
     ),
     ("l1_single.zarr", "l1_single.zarr/", ["'/': cannot list"]),

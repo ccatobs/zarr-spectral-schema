@@ -130,3 +130,39 @@ fn source_l0_store_is_a_uri_reference() {
         }
     }
 }
+
+// ── 6. one local walk, one input grammar ───────────────────────────────────
+
+#[test]
+fn symlinked_scan_is_not_followed() {
+    // scan_000002 links to a scan without spectra; the walk does not enter it.
+    let store = fixtures().join("l1_symlinked_scan.zarr");
+    assert!(store.join("scan_000002").is_symlink());
+    let e = errors("l1_symlinked_scan.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}
+
+#[test]
+fn local_path_with_double_colon_is_that_path() {
+    let e = errors("a::b/miss_array.zarr");
+    assert_eq!(e, ["[L1] required array 'scan_000001/spectra' is missing"]);
+}
+
+#[test]
+fn unlistable_local_group_is_an_error() {
+    use std::os::unix::fs::PermissionsExt;
+    // l1_bad_skydiff.zarr has two errors when every node is readable.
+    let skydiff = fixtures().join("l1_bad_skydiff.zarr/scan_000001/skydiff");
+    let mode = |m| std::fs::Permissions::from_mode(m);
+    std::fs::set_permissions(&skydiff, mode(0o311)).unwrap(); // no read: cannot list
+    let e = errors("l1_bad_skydiff.zarr");
+    std::fs::set_permissions(&skydiff, mode(0o755)).unwrap();
+    assert_eq!(e, ["[L1] 'scan_000001/skydiff/': cannot list"]);
+}
+
+#[cfg(not(feature = "s3"))]
+#[test]
+fn url_without_the_s3_feature_is_an_explicit_error() {
+    let e = zss::validate(Path::new("s3://zss/l1_single.zarr"));
+    assert_eq!(e, ["s3://zss/l1_single.zarr: s3:// needs the `s3` feature"]);
+}

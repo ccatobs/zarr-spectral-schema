@@ -14,9 +14,15 @@ path = "src/lib.rs"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"
-object_store = { version = "0.14", features = ["aws"] }
-tokio = { version = "1", features = ["rt"] }
-url = "2"
+# s3:// stores (feature `s3`, off by default): calibrate's local build pulls none of these.
+object_store = { version = "0.14", features = ["aws"], optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
+url = { version = "2", optional = true }
+
+[features]
+default = []
+# Validate s3:// stores through object_store (AWS S3 and S3-compatible endpoints).
+s3 = ["dep:object_store", "dep:tokio", "dep:url"]
 
 [build-dependencies]
 serde_yaml = "0.9"

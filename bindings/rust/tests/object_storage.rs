@@ -4,7 +4,8 @@
 //! the same helper the Python tests use). The validator takes an `s3://` URL,
 //! reads only `zarr.json` objects, and gives the verdict it gives for the same
 //! store on a local disk, and the verdict the Python validator gives for the
-//! same `s3://` URL.
+//! same `s3://` URL. Needs the `s3` feature: `cargo test --features s3`.
+#![cfg(feature = "s3")]
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,11 @@ const GENERATED: &[&str] = &[
     "l0_sharded.zarr",
     "l1_l0_store_abs_path.zarr",
 ];
+/// Two errors when readable; served for the deny cases only (its dtype message
+/// quotes the dtype differently in the two bindings, a finding older than #20).
+const BAD_SKYDIFF: &str = "l1_bad_skydiff.zarr";
+/// A store under a key with a space, read through its `%20` URL.
+const SPACED: &str = "my store.zarr";
 const REAL: &[&str] = &["calibrate/ORION_KL", "zarr/SOFIA_UPGREAT_ORION_KL.zarr"];
 
 struct S3 {
@@ -32,12 +38,17 @@ struct S3 {
 }
 
 impl S3 {
-    /// The requests served since the previous call, and the offending ones.
-    fn requests(&mut self) -> Value {
-        writeln!(self.stdin, "requests").unwrap();
+    /// Send one command line to the helper; return its one-line JSON answer.
+    fn send(&mut self, command: &str) -> Value {
+        writeln!(self.stdin, "{command}").unwrap();
         let mut line = String::new();
         self.stdout.read_line(&mut line).unwrap();
         serde_json::from_str(&line).unwrap()
+    }
+
+    /// The requests served since the previous call, and the offending ones.
+    fn requests(&mut self) -> Value {
+        self.send("requests")
     }
 }
 
@@ -59,15 +70,17 @@ fn s3() -> &'static Mutex<S3> {
             .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
         assert!(status.success(), "generator failed");
         let real = root().join("conformance/real_stores");
-        let stores: Vec<(String, PathBuf)> = GENERATED
+        let mut stores: Vec<(String, PathBuf)> = GENERATED
             .iter()
             .map(|n| out.join(n))
             .chain(REAL.iter().map(|n| real.join(n)))
             .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), p))
             .collect();
+        stores.push((SPACED.to_string(), out.join("l1_single.zarr")));
         let mut child = Command::new("python3")
             .arg(root().join("conformance/s3_server.py"))
-            .args(stores.iter().map(|(_, p)| p))
+            .args(stores.iter().map(|(n, p)| format!("{n}={}", p.display())))
+            .arg(out.join(BAD_SKYDIFF))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -80,6 +93,11 @@ fn s3() -> &'static Mutex<S3> {
         for (k, v) in hello["env"].as_object().unwrap() {
             std::env::set_var(k, v.as_str().unwrap());
         }
+        // A variable that is not UTF-8 must not stop the validator.
+        std::env::set_var(
+            "ZSS_NOT_UTF8",
+            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"\xff"),
+        );
         Mutex::new(S3 {
             _child: child,
             stdin,
@@ -90,7 +108,7 @@ fn s3() -> &'static Mutex<S3> {
 }
 
 fn url(name: &str) -> String {
-    format!("s3://zss/{name}")
+    format!("s3://zss/{}", name.replace(' ', "%20"))
 }
 
 /// The Python validator's errors for each URL, run in a subprocess.
@@ -152,4 +170,41 @@ fn validator_reads_only_zarr_json_objects() {
         "no zarr.json read: {served:?}"
     );
     assert_eq!(log["offending"], Value::Array(vec![]), "{log}");
+}
+
+/// (store, object key or listing prefix answered with 403, expected errors);
+/// the same cases as `DENY_CASES` in conformance/test_object_storage.py.
+const DENY_CASES: &[(&str, &str, &[&str])] = &[
+    (
+        "l1_bad_skydiff.zarr",
+        "l1_bad_skydiff.zarr/scan_000001/skydiff/",
+        &["[L1] 'scan_000001/skydiff/': cannot list"],
+    ),
+    (
+        "l1_single.zarr",
+        "l1_single.zarr/scan_000001/t_int/zarr.json",
+        &[
+            "[L1] 'scan_000001/t_int/zarr.json': cannot read metadata",
+            "[L1] required array 'scan_000001/t_int' is missing",
+        ],
+    ),
+    ("l1_single.zarr", "l1_single.zarr/", &["'/': cannot list"]),
+    (
+        "l1_single.zarr",
+        "l1_single.zarr/zarr.json",
+        &["'zarr.json': cannot read metadata"],
+    ),
+];
+
+#[test]
+fn unreadable_node_is_an_error_in_both_bindings() {
+    let mut s3 = s3().lock().unwrap();
+    for (name, deny, expected) in DENY_CASES {
+        s3.send(&format!("deny {deny}"));
+        let rust = zss::check(Path::new(&url(name))).errors;
+        let python = python_errors(&[url(name)]).remove(0);
+        s3.send("allow");
+        assert_eq!(rust, *expected, "{deny}: Rust");
+        assert_eq!(python, *expected, "{deny}: Python");
+    }
 }
