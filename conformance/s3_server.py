@@ -124,7 +124,10 @@ def main(stores: list[str]) -> None:
     server = S3Server()
     for store in stores:
         server.upload(Path(store))
-    print(json.dumps({"endpoint": server.endpoint, "env": env(server.endpoint)}), flush=True)
+    print(
+        json.dumps({"endpoint": server.endpoint, "env": env(server.endpoint)}),
+        flush=True,
+    )
     for line in sys.stdin:
         if line.strip() == "requests":
             served = server.take_requests()
