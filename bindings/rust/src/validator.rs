@@ -74,6 +74,9 @@ struct Level {
 struct AttrSpec {
     r#type: String,
     required: bool,
+    /// Value constraint: the attr must hold exactly this value.
+    #[serde(default)]
+    equals: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -309,7 +312,8 @@ fn check_group_arrays(
 
 /// Check declared attrs at one placement location (`where_` is the store path
 /// used in messages). Required attrs must be present and (if present)
-/// type-checked; optional attrs are type-checked only when present.
+/// type-checked; optional attrs are type-checked only when present. An `equals`
+/// value constraint is checked after the type.
 fn check_attrs(
     attrs: &Map<String, Value>,
     declared: &BTreeMap<String, AttrSpec>,
@@ -331,6 +335,10 @@ fn check_attrs(
                 "[{level_name}] attribute '{name}' at '{where_}' must be of type \
                  {:?}, got {value}",
                 aspec.r#type
+            ));
+        } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must equal {equals}, got {value}"
             ));
         }
     }

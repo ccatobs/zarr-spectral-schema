@@ -75,3 +75,8 @@ def test_scan_with_seven_digit_name_is_checked(stores):
 def test_root_child_not_matching_scan_pattern_is_rejected(stores):
     errors = zss.validate(stores / "l0_bad_scan_name.zarr")
     assert any("'scan_12'" in e and "scan pattern" in e for e in errors), errors
+
+
+def test_l1_complete_false_is_rejected(stores):
+    errors = zss.validate(stores / "l1_incomplete.zarr")
+    assert any("l1_complete" in e and "must equal true" in e for e in errors), errors

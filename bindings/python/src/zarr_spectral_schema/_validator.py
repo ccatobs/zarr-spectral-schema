@@ -28,6 +28,7 @@ returns the full :class:`ValidationResult` with warnings.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -251,7 +252,8 @@ def _check_attrs(
     """Check declared attrs at one placement location.
 
     Required attrs must be present and (if present) type-checked; optional attrs
-    are type-checked only when present. ``where`` is the store path used in
+    are type-checked only when present. An ``equals`` value constraint is checked
+    after the type. ``where`` is the store path used in
     messages (``root`` or a group path) so failures point at the exact location.
     """
     for name, aspec in declared.items():
@@ -269,6 +271,12 @@ def _check_attrs(
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be of type "
                 f"{expected!r}, got {attrs[name]!r}"
+            )
+        elif "equals" in aspec and attrs[name] != aspec["equals"]:
+            # JSON rendering keeps the message identical to the Rust binding's.
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must equal "
+                f"{json.dumps(aspec['equals'])}, got {json.dumps(attrs[name])}"
             )
 
 

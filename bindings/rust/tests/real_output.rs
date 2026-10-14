@@ -89,3 +89,12 @@ fn root_child_not_matching_scan_pattern_is_rejected() {
         "expected a scan-pattern error naming scan_12, got: {e:?}"
     );
 }
+
+#[test]
+fn l1_complete_false_is_rejected() {
+    let e = errors("l1_incomplete.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("l1_complete") && m.contains("must equal true")),
+        "expected a value-constraint error, got: {e:?}"
+    );
+}

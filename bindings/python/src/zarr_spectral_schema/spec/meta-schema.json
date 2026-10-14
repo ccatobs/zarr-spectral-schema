@@ -140,7 +140,11 @@
           "description": "JSON value type the attribute is encoded as.",
           "enum": ["string", "integer", "number", "boolean", "array", "object"]
         },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "equals": {
+          "description": "Value constraint: when present on disk, the attribute must hold exactly this value.",
+          "type": ["string", "integer", "number", "boolean"]
+        }
       }
     },
     "array": {

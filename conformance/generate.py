@@ -51,6 +51,8 @@ def _level_for(spec: dict, detect_attr: str) -> dict:
 
 def _sample_attr(aspec: dict, name: str):
     """A representative on-disk value for a declared attr of the given type."""
+    if "equals" in aspec:
+        return aspec["equals"]
     t = aspec["type"]
     if t == "string":
         return f"{name}_value"
@@ -355,6 +357,8 @@ def emit_real_output_fixtures(out: Path) -> None:
             "processing_steps": {"skydiff": False, "obs_mode": "TotalPower"},
         },
     )
+    # The completeness marker holds `true` (a DSL value constraint).
+    emit_l1_single(out / "l1_incomplete.zarr", scan_attr_overrides={"l1_complete": False})
     # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
     emit_l1_single(out / "l1_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
 

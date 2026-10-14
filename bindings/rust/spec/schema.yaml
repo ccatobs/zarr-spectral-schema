@@ -24,7 +24,8 @@
 # version → UPPER(attr key). Override with `const:`; suppress a group const with
 # `const: false`. `lists:`/`markers:` yield `&[&str]`/`&str` consts directly.
 # The new group fields (placement/inline) and the `*_attrs` sections generate NO
-# consts — they are validator data only.
+# consts — they are validator data only. An attr may carry `equals: <value>`
+# (value constraint): when present, the attr must hold exactly that value.
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
 spec_version: "0.1.0"
@@ -248,7 +249,7 @@ levels:
     scan_or_band_attrs:
       line:         { type: string,  required: true }
       rest_freq_hz: { type: number,  required: true }
-      l1_complete:  { type: boolean, required: true }
+      l1_complete:  { type: boolean, required: true, equals: true }
       frontend:     { type: string,  required: false }
       # Verbatim source-keyword provenance forwarded from L0 (calibrated.rs writes
       # it per band in multi-frontend stores). Top-level object type-checked only.
