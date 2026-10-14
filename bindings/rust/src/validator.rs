@@ -21,8 +21,8 @@
 //!   arrays/attrs, the L0 `source`/`calibration` sub-groups, and the diagnostic
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
 //!   The spec's `one_of` (exactly one of these groups per target), `equals`
-//!   (attr value constraint) and `prefix` (array family) fields are interpreted
-//!   the same way. Every structure finding starts with `[<level>] `; version and
+//!   (attr value constraint), `format` (`uri-reference`), `prefix` (array
+//!   family), dtype sets and array `attrs` are interpreted the same way. Every structure finding starts with `[<level>] `; version and
 //!   level-detection errors do not (calibrate splits on this prefix, kalibrate#82).
 //! * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
 //!   is range-checked against the spec's supported window (`min_supported` ..
