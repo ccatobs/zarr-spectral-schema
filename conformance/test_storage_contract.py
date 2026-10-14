@@ -53,3 +53,19 @@ def test_l1_non_integer_keepbits_is_rejected(stores):
         "keepbits" in e and "scan_000001/spectra" in e and "'integer'" in e
         for e in errors
     ), errors
+
+
+# ── 4. valid dump count ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "name, rel",
+    [
+        ("l0_bad_valid_dumps.zarr", "scan_000001/source/n_valid_dumps"),
+        ("l1_bad_valid_dumps.zarr", "scan_000001/n_valid_dumps"),
+    ],
+)
+def test_valid_dump_count_dtype_and_dims_are_checked(stores, name, rel):
+    errors = zss.validate(stores / name)
+    assert any(rel in e and "dtype" in e for e in errors), errors
+    assert any(rel in e and "ndim" in e for e in errors), errors

@@ -171,6 +171,7 @@ def emit_l0(
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
+    array_overrides: dict[str, dict] | None = None,
 ) -> Path:
     """Emit an L0 store: scan_<N>/<group>/<arrays> + attrs.
 
@@ -211,7 +212,9 @@ def emit_l0(
             if gname in one_of and gname not in chosen:
                 continue
             sub = scan.require_group(gname)
-            _write_arrays(sub, gspec, f"{scan_name}/{gname}", omit, emit_optional=True)
+            _write_arrays(
+                sub, gspec, f"{scan_name}/{gname}", omit, True, array_overrides
+            )
     return out_dir
 
 
@@ -482,6 +485,16 @@ def emit_storage_fixtures(out: Path) -> None:
     emit_l1_single(
         out / "l1_bad_keepbits.zarr",
         array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": "12"}}},
+    )
+    # The valid dump count per subscan is int32 [S] where present.
+    bad = {"dtype": "float64", "ndim": 2}
+    emit_l0(
+        out / "l0_bad_valid_dumps.zarr",
+        array_overrides={f"{_SCAN}/source/n_valid_dumps": bad},
+    )
+    emit_l1_single(
+        out / "l1_bad_valid_dumps.zarr",
+        array_overrides={f"{_SCAN}/n_valid_dumps": bad},
     )
 
 

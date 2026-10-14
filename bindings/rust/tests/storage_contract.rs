@@ -67,3 +67,23 @@ fn l1_non_integer_keepbits_is_rejected() {
         "expected a keepbits type error, got: {e:?}"
     );
 }
+
+// ── 4. valid dump count ────────────────────────────────────────────────────
+
+#[test]
+fn valid_dump_count_dtype_and_dims_are_checked() {
+    for (name, rel) in [
+        ("l0_bad_valid_dumps.zarr", "scan_000001/source/n_valid_dumps"),
+        ("l1_bad_valid_dumps.zarr", "scan_000001/n_valid_dumps"),
+    ] {
+        let e = errors(name);
+        assert!(
+            e.iter().any(|m| m.contains(rel) && m.contains("dtype")),
+            "{name}: expected a dtype error, got: {e:?}"
+        );
+        assert!(
+            e.iter().any(|m| m.contains(rel) && m.contains("ndim")),
+            "{name}: expected an ndim error, got: {e:?}"
+        );
+    }
+}

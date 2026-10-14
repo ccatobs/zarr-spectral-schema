@@ -171,6 +171,10 @@ levels:
           # record carries a FITS LOAD_TEMP_ARRAY (HFA HOT/COLD) → required:false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
           load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
+          # Valid dump count per subscan [S] (#20): zarr-fits pads the dump axis
+          # D of each subscan to the longest subscan; dumps 0..n-1 of subscan s
+          # hold data, the rest is fill. Absent ⇒ a reader takes every dump.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
       calibration:              # → const CALIBRATION_GROUP
         # L0 obs sub-group: arrays under scan_<N>/calibration/ (inline:false).
         placement: scan
@@ -202,6 +206,7 @@ levels:
           # here (the writer's geometry block is source-only). Conditional → false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
           load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }   # [S], as in source
   L1:
     # A store is L1 iff its root group carries this attr (slice-4 detection).
     detect: cal_schema_version
@@ -303,6 +308,9 @@ levels:
           otf_airmass:      { dtype: float64, ndim: 2, required: false }
           pixel_offset_lon: { dtype: float64, ndim: 3, required: false }
           pixel_offset_lat: { dtype: float64, ndim: 3, required: false }
+          # Valid dump count per subscan [S] (#20): spectra keeps the padded D
+          # axis of L0, so the L0 count carries over.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
       skydiff:                  # → const SKYDIFF_GROUP
         # Diagnostic sub-group under the scan/band group (diagnostic modes only).
         placement: scan_or_band
