@@ -37,6 +37,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use object_store::local::LocalFileSystem;
+use object_store::path::Path as Key;
+use object_store::{ObjectStore, ObjectStoreExt};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -173,6 +176,11 @@ pub fn validate(store: &Path) -> Vec<String> {
 }
 
 /// Validate a Zarr v3 store against the spec, returning errors and warnings.
+///
+/// `store` is a local path or a URL (`Path::new("s3://bucket/store.zarr")`);
+/// an S3 store takes its endpoint, region and credentials from the standard
+/// `AWS_*` environment variables. Blocks on its own runtime: do not call it from
+/// inside a tokio runtime.
 pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
     let mut result = ValidationResult::default();
@@ -607,51 +615,113 @@ fn is_band(name: &str) -> bool {
 // non-finite number (`NaN`, `Infinity`, `-Infinity`) is its own error; any other
 // unparseable `zarr.json` is a malformed-metadata error. The node is then left
 // out of the view.
+//
+// Object storage (#20): the store is a local path or a URL `object_store` opens
+// (`s3://bucket/store.zarr`). The walk reads only `zarr.json` objects: it lists
+// the children of each group node and stops at an array node, so it never lists
+// or opens a chunk key. A directory without a `zarr.json` is not a node, and the
+// walk does not enter it.
+
+/// One store behind `object_store`, with a runtime to block on its futures.
+struct Reader {
+    rt: tokio::runtime::Runtime,
+    store: Box<dyn ObjectStore>,
+}
+
+impl Reader {
+    /// Open a local path or a URL; return the reader and the key of the store root.
+    fn open(store: &Path) -> Result<(Self, Key), String> {
+        let (os, root): (Box<dyn ObjectStore>, Key) =
+            match store.to_str().filter(|s| s.contains("://")) {
+                Some(s) => {
+                    let url = url::Url::parse(s).map_err(|e| format!("{s}: {e}"))?;
+                    let aws_env = std::env::vars().filter(|(k, _)| k.starts_with("AWS_"));
+                    object_store::parse_url_opts(&url, aws_env).map_err(|e| format!("{s}: {e}"))?
+                }
+                None => {
+                    let fs =
+                        LocalFileSystem::new_with_prefix(store).map_err(|_| not_group(store))?;
+                    (Box::new(fs), Key::default())
+                }
+            };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        Ok((Self { rt, store: os }, root))
+    }
+
+    /// The object at `key`: `Ok(None)` when absent, `Err` when it cannot be read.
+    fn get(&self, key: &Key) -> Result<Option<Vec<u8>>, object_store::Error> {
+        let get = async { self.store.get(key).await?.bytes().await };
+        match self.rt.block_on(get) {
+            Ok(bytes) => Ok(Some(bytes.to_vec())),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The child prefixes of `dir`, sorted (one delimiter listing; no chunk key).
+    fn children(&self, dir: &Key) -> Vec<Key> {
+        let Ok(list) = self.rt.block_on(self.store.list_with_delimiter(Some(dir))) else {
+            return Vec::new();
+        };
+        let mut children = list.common_prefixes;
+        children.sort();
+        children
+    }
+}
+
+fn not_group(store: &Path) -> String {
+    format!(
+        "{}: not a Zarr v3 group (missing/!group root zarr.json)",
+        store.display()
+    )
+}
 
 /// Walk a Zarr v3 store and normalize every node keyed by relative path.
 /// Fails only when the root is not a readable Zarr v3 group.
 fn read_store(store: &Path) -> Result<StoreView, String> {
-    let not_group = || {
-        format!(
-            "{}: not a Zarr v3 group (missing/!group root zarr.json)",
-            store.display()
-        )
-    };
-    let root = read_meta(&store.join("zarr.json"), "zarr.json")?.ok_or_else(not_group)?;
-    if root.get("node_type").and_then(Value::as_str) != Some("group") {
-        return Err(not_group());
+    let (reader, root) = Reader::open(store)?;
+    let meta = read_meta(&reader, &root.clone().join("zarr.json"), "zarr.json")?
+        .ok_or_else(|| not_group(store))?;
+    if meta.get("node_type").and_then(Value::as_str) != Some("group") {
+        return Err(not_group(store));
     }
     let mut view = StoreView {
-        root_attrs: attributes(&root),
+        root_attrs: attributes(&meta),
         ..StoreView::default()
     };
-    walk(store, store, &mut view);
+    walk(&reader, &root, "", &mut view);
     Ok(view)
 }
 
-/// Recurse below `dir`, recording each child node that holds a `zarr.json`.
-fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+/// Record each child node of the group at `dir` (`rel` in the store); recurse
+/// into child groups.
+///
+/// ponytail: one request at a time; fetch siblings concurrently if a large
+/// store on object storage makes the walk slow.
+fn walk(reader: &Reader, dir: &Key, rel: &str, view: &mut StoreView) {
+    for child in reader.children(dir) {
+        let Some(name) = child.filename() else {
             continue;
-        }
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(root)
-            .expect("walked path lies under the store root")
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        match read_meta(&path.join("zarr.json"), &format!("{rel}/zarr.json")) {
+        };
+        let rel = if rel.is_empty() {
+            name.to_string()
+        } else {
+            format!("{rel}/{name}")
+        };
+        match read_meta(
+            reader,
+            &child.clone().join("zarr.json"),
+            &format!("{rel}/zarr.json"),
+        ) {
             Err(e) => view.errors.push(e),
             Ok(None) => {}
             Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
                 Some("group") => {
-                    view.groups.insert(rel, attributes(&meta));
+                    view.groups.insert(rel.clone(), attributes(&meta));
+                    walk(reader, &child, &rel, view);
                 }
                 Some("array") => {
                     let ndim = meta
@@ -666,19 +736,17 @@ fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
                 _ => {}
             },
         }
-        walk(root, &path, view);
     }
 }
 
 /// Parse one `zarr.json`: `Ok(None)` when absent, `Err` naming `rel` when it
 /// does not parse to a JSON object.
-fn read_meta(path: &Path, rel: &str) -> Result<Option<Map<String, Value>>, String> {
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let text = std::fs::read(path)
-        .ok()
-        .and_then(|b| String::from_utf8(b).ok());
+fn read_meta(reader: &Reader, key: &Key, rel: &str) -> Result<Option<Map<String, Value>>, String> {
+    let text = match reader.get(key) {
+        Ok(None) => return Ok(None),
+        Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
+        Err(_) => None,
+    };
     match text.as_deref().map(serde_json::from_str::<Value>) {
         Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
         Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {

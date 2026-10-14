@@ -85,7 +85,10 @@ fn l1_non_integer_keepbits_is_rejected() {
 #[test]
 fn valid_dump_count_dtype_and_dims_are_checked() {
     for (name, rel) in [
-        ("l0_bad_valid_dumps.zarr", "scan_000001/source/n_valid_dumps"),
+        (
+            "l0_bad_valid_dumps.zarr",
+            "scan_000001/source/n_valid_dumps",
+        ),
         ("l1_bad_valid_dumps.zarr", "scan_000001/n_valid_dumps"),
     ] {
         let e = errors(name);

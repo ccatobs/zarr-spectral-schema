@@ -10,11 +10,12 @@ Python tests import :class:`S3Server`. The Rust tests run this file:
     python conformance/s3_server.py <store_dir>...
 
 It uploads each store under its directory name into bucket ``zss``, prints the
-endpoint URL as the first line on stdout and serves until stdin closes. Each
+endpoint URL and its AWS environment (:func:`env`) as one JSON line on stdout
+and serves until stdin closes. Each
 stdin line ``requests`` prints one JSON line: the requests served since the
 previous line, and the offending ones among them.
 
-Clients take the endpoint from the standard AWS environment (:data:`ENV`).
+Clients take the endpoint from the standard AWS environment (:func:`env`).
 """
 
 from __future__ import annotations
@@ -123,7 +124,7 @@ def main(stores: list[str]) -> None:
     server = S3Server()
     for store in stores:
         server.upload(Path(store))
-    print(server.endpoint, flush=True)
+    print(json.dumps({"endpoint": server.endpoint, "env": env(server.endpoint)}), flush=True)
     for line in sys.stdin:
         if line.strip() == "requests":
             served = server.take_requests()
