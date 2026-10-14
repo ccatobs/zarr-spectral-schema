@@ -28,6 +28,51 @@
 # an error. Versions and scan/band names are ASCII digits only. Every structure
 # finding starts with "[<level>] "; version and level-detection errors do not.
 #
+# ── Storage rules (#20, ADR-0008) ──
+#
+# Object storage. A store is a local path or an object-store URL
+# (s3://bucket/store.zarr). Both validators read only zarr.json objects: they
+# list the children of each group node and stop at an array node, so they never
+# list or open a chunk key. A directory without a zarr.json is not a node.
+#
+# Chunk independence (invariant). A reader gives the same result for any chunk
+# shape and any shard shape. The contract states no chunk rule; a reader that
+# depends on the chunk shape of one writer breaks this invariant. The
+# conformance set holds l0_sharded.zarr and l1_sharded.zarr, whose chunk layout
+# differs from the writer default.
+#
+# Recommended layout (non-binding; binds no producer). For each 5-D array
+# (C, D, R, A, S): one shard per pixel and subscan, shard shape (C, D, 1, 1, 1),
+# with inner chunks of about 1 MB uncompressed (0.5 to 4 MB; e.g. (C, 4, 1, 1, 1)
+# for 64k float32 channels, (C, 2, 1, 1, 1) for float64). Shard target: 16 MB to
+# 512 MB uncompressed; when one pixel and subscan exceeds 512 MB, split D into
+# equal parts. Why: a reader of one pixel or one subscan fetches one object, an
+# inner chunk is the unit of a ranged read, a writer holds one shard in memory,
+# and an object store charges per request (objects far below 1 MB make reads
+# request-bound). One shard per array, as written today, gives one 403 GB
+# spectra object for a 10-minute OTF scan of 2x64 pixels, 64k channels at 10 Hz.
+#
+# Consolidated metadata (decision). A finished store MAY hold consolidated
+# metadata: zarr-python's inline form (`consolidated_metadata` with
+# kind: inline, must_understand: false) in the root zarr.json, written by the
+# producer as its last write, after every completeness marker. It is
+# recommended for a finished store read with zarr-python over object storage
+# (one GET instead of one listing per group and one GET per node). It is never
+# required and never authoritative: the validators ignore it and check each
+# node's own zarr.json, and a reader that uses it still skips a unit without
+# its completeness marker. Why not required: it is a zarr-python convention,
+# not part of the Zarr v3 core spec; zarrs 0.23 (calibrate) writes it
+# (Node::consolidate_metadata + Group::set_consolidated_metadata, verified to
+# open with zarr.open_consolidated) but does not read it; a streaming store
+# gains units after each write, so a root cache is stale between appends; and
+# no real store holds it, so a requirement would reject every existing store.
+#
+# One writer per store (ADR-0008 amendment). One producer writes a store:
+# zarr-fits writes an L0 store, calibrate writes an L1 store. A consumer (YODA)
+# writes no group into the store of a producer; it writes its output to a store
+# of its own. A link from one store to another (source_l0_store) is a URI
+# reference.
+#
 # Codegen rule (build.rs): each array/group/version yields a Rust `pub const`.
 # Default identifier: array → UPPER(on-disk name); group → UPPER(name)_GROUP;
 # version → UPPER(attr key). Override with `const:`; suppress a group const with
