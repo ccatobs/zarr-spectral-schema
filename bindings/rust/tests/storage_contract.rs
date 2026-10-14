@@ -31,6 +31,18 @@ fn errors(name: &str) -> Vec<String> {
     zss::validate(&fixtures().join(name))
 }
 
+// ── 1. chunk independence ──────────────────────────────────────────────────
+
+#[test]
+fn store_with_non_default_chunk_layout_is_green() {
+    // One shard per pixel and subscan (C, D, 1, 1, 1) with inner chunks; the
+    // Python test asserts the layout on disk.
+    for name in ["l0_sharded.zarr", "l1_sharded.zarr"] {
+        let e = errors(name);
+        assert!(e.is_empty(), "{name}: expected green, got: {e:?}");
+    }
+}
+
 // ── 3. dtype choice ────────────────────────────────────────────────────────
 
 #[test]

@@ -7,6 +7,7 @@ same checks over the same stores (bindings/rust/tests/storage_contract.rs).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -25,6 +26,28 @@ def stores(tmp_path_factory) -> Path:
     out = tmp_path_factory.mktemp("storage")
     generate.emit_storage_fixtures(out)
     return out
+
+
+# ── 1. chunk independence ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "name, rel",
+    [
+        ("l0_sharded.zarr", "scan_000001/source/data_5d"),
+        ("l1_sharded.zarr", "scan_000001/spectra"),
+    ],
+)
+def test_store_with_non_default_chunk_layout_is_green(stores, name, rel):
+    # The fixture really holds the recommended layout, not the writer default
+    # (one chunk per array): one shard per pixel and subscan (C, D, 1, 1, 1)
+    # with inner chunks.
+    meta = json.loads((stores / name / rel / "zarr.json").read_text())
+    assert meta["chunk_grid"]["configuration"]["chunk_shape"] == [2, 2, 1, 1, 1]
+    assert meta["shape"] == [2, 2, 2, 2, 2]
+    assert meta["codecs"][0]["name"] == "sharding_indexed"
+    assert meta["codecs"][0]["configuration"]["chunk_shape"] == [1, 2, 1, 1, 1]
+    assert zss.validate(stores / name) == []
 
 
 # ── 3. dtype choice ────────────────────────────────────────────────────────

@@ -106,6 +106,7 @@ def _write_arrays(
     omit: set[str],
     emit_optional: bool,
     array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> None:
     """Create a group's arrays under ``parent``.
 
@@ -115,7 +116,10 @@ def _write_arrays(
     An array family (``prefix``) is emitted as its first member ``<prefix>0``.
     ``array_overrides`` maps a store-relative path to ``dtype``/``ndim`` values
     that replace the declared ones (wrong-typed negatives), and ``attr_values``
-    to literal array attr values.
+    to literal array attr values. ``sharded`` writes every axis with length 2
+    and a chunk layout other than the writer default: 5-D arrays (C, D, R, A, S)
+    get the recommended one shard per pixel and subscan (C, D, 1, 1, 1) with
+    inner chunks (C/2, D, 1, 1, 1); the other arrays one chunk per element.
     """
     array_overrides = array_overrides or {}
     for array_name, aspec in group_spec.get("arrays", {}).items():
@@ -126,12 +130,17 @@ def _write_arrays(
         if not aspec.get("required", False) and not emit_optional:
             continue
         aspec = {**aspec, **array_overrides.get(rel, {})}
-        shape = tuple([1] * aspec["ndim"])
+        ndim = aspec["ndim"]
+        layout = {"shape": (1,) * ndim}
+        if sharded:
+            layout = {"shape": (2,) * ndim, "chunks": (1,) * ndim}
+            if ndim == 5:
+                layout.update(shards=(2, 2, 1, 1, 1), chunks=(1, 2, 1, 1, 1))
         # A dtype set (#20): write its first name, as the producers do by default.
         dtype = (
             aspec["dtype"][0] if isinstance(aspec["dtype"], list) else aspec["dtype"]
         )
-        arr = parent.create_array(name=name, shape=shape, dtype=dtype)
+        arr = parent.create_array(name=name, dtype=dtype, **layout)
         _write_attrs(
             arr, aspec.get("attrs", {}), set(), emit_optional, aspec.get("attr_values")
         )
@@ -172,6 +181,7 @@ def emit_l0(
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
     array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> Path:
     """Emit an L0 store: scan_<N>/<group>/<arrays> + attrs.
 
@@ -213,7 +223,7 @@ def emit_l0(
                 continue
             sub = scan.require_group(gname)
             _write_arrays(
-                sub, gspec, f"{scan_name}/{gname}", omit, True, array_overrides
+                sub, gspec, f"{scan_name}/{gname}", omit, True, array_overrides, sharded
             )
     return out_dir
 
@@ -226,6 +236,7 @@ def emit_l1_single(
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
     array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> Path:
     """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
 
@@ -259,10 +270,12 @@ def emit_l1_single(
         if gspec.get("placement") != "scan_or_band":
             continue
         if gspec.get("inline", False):
-            _write_arrays(scan, gspec, _SCAN, omit, True, array_overrides)
+            _write_arrays(scan, gspec, _SCAN, omit, True, array_overrides, sharded)
         else:
             sub = scan.require_group(gname)
-            _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, True, array_overrides)
+            _write_arrays(
+                sub, gspec, f"{_SCAN}/{gname}", omit, True, array_overrides, sharded
+            )
     return out_dir
 
 
@@ -477,6 +490,10 @@ def emit_storage_fixtures(out: Path) -> None:
     Both bindings validate these same stores: the Python tests call this
     function, the Rust tests run ``main()``.
     """
+    # Chunk independence: a store with a chunk layout other than the writer
+    # default (the recommended one shard per pixel and subscan) is conformant.
+    emit_l0(out / "l0_sharded.zarr", sharded=True)
+    emit_l1_single(out / "l1_sharded.zarr", sharded=True)
     # L1 spectra and t_sys accept float32 as well as float64.
     for dtype in ("float32", "float64"):
         emit_l1_single(
