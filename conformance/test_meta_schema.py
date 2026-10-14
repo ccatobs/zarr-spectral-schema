@@ -65,6 +65,13 @@ def test_real_spec_passes_meta_schema():
             ),
             id="unknown-attr-format",
         ),
+        # A format constrains a string: on any other type it is a spec error.
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+                "type", "integer"
+            ),
+            id="format-on-non-string-attr",
+        ),
         pytest.param(
             lambda s: s["versions"]["l0_schema_version"].__setitem__(
                 "on_disk", "float"
