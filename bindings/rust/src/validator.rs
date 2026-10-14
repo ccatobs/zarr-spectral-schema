@@ -55,6 +55,9 @@ struct Level {
     /// Root attribute whose presence marks a store as this level.
     #[serde(default)]
     detect: Option<String>,
+    /// Groups of which each placement target holds exactly one.
+    #[serde(default)]
+    one_of: Vec<String>,
     #[serde(default)]
     root_attrs: BTreeMap<String, AttrSpec>,
     #[serde(default)]
@@ -213,23 +216,41 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
             check_attrs(&view.groups[b], &level.band_attrs, b, level_name, result);
         }
 
-        // scan_or_band resolves to the scan group (single) or each band (multi).
-        let targets = if bands.is_empty() { vec![sg.clone()] } else { bands };
-        for t in &targets {
+        // `scan` placement resolves to the scan group; `scan_or_band` to the
+        // scan group (single-frontend) or each band (multi-frontend).
+        let sob = if bands.is_empty() { vec![sg.clone()] } else { bands };
+        for t in &sob {
             let attrs = view.groups.get(t).unwrap_or(&empty);
             check_attrs(attrs, &level.scan_or_band_attrs, t, level_name, result);
-            for (gname, group) in &level.groups {
-                if group.placement.as_deref() == Some("scan_or_band") {
+        }
+        for (placement, targets) in [("scan", vec![sg.clone()]), ("scan_or_band", sob)] {
+            let placed: Vec<(&String, &Group)> = level
+                .groups
+                .iter()
+                .filter(|(_, g)| g.placement.as_deref() == Some(placement))
+                .collect();
+            let one_of: Vec<&String> = level
+                .one_of
+                .iter()
+                .filter(|n| placed.iter().any(|(p, _)| p == n))
+                .collect();
+            for t in &targets {
+                let present: Vec<&String> = one_of
+                    .iter()
+                    .copied()
+                    .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
+                    .collect();
+                if !one_of.is_empty() && present.len() != 1 {
+                    result.errors.push(format!(
+                        "[{level_name}] '{t}' must hold exactly one of {one_of:?}, found {present:?}"
+                    ));
+                }
+                for (gname, group) in &placed {
+                    if one_of.contains(gname) && !present.contains(gname) {
+                        continue;
+                    }
                     check_group_arrays(view, t, gname, group, level_name, result);
                 }
-            }
-        }
-
-        // `placement: scan` groups (L0 source/calibration) live under the scan
-        // group regardless of multi-frontend.
-        for (gname, group) in &level.groups {
-            if group.placement.as_deref() == Some("scan") {
-                check_group_arrays(view, sg, gname, group, level_name, result);
             }
         }
     }

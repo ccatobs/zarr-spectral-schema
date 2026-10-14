@@ -50,6 +50,10 @@ levels:
   L0:
     # A store is L0 iff its root group carries this attr (slice-4 detection).
     detect: l0_schema_version
+    # A scan is single-purpose (CONTEXT.md): each scan group holds exactly one of
+    # these groups. Only the present group's arrays are checked; both or neither
+    # is an error. zarr-fits routes each scan to one group by SOBSMODE.
+    one_of: [source, calibration]
     # Root-group session attrs (zarr-fits-core writer.rs:61-103). All are written
     # unconditionally, but profile/site/observer/fits_folder may be empty
     # placeholders on partial sessions, so only the always-meaningful identity +

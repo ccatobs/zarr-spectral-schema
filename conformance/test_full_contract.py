@@ -12,9 +12,6 @@ sub-groups, multi-frontend ``band_<M>`` sub-groups):
     sit at the scan group for single-frontend and at each band for multi-frontend,
     and both stores validate green.
 
-A final test validates the REAL writer-produced L1 store if the fixture is present
-(skipped otherwise so CI without it still passes).
-
 The Rust binding runs the equivalent checks over the SAME emitted stores
 (bindings/rust/tests/conformance.rs) — together they prove one spec drives one
 interpretation in both languages.
@@ -22,7 +19,6 @@ interpretation in both languages.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -34,20 +30,6 @@ sys.path.insert(0, str(_ROOT / "conformance"))
 
 import generate  # noqa: E402
 import zarr_spectral_schema as zss  # noqa: E402
-
-
-def _real_store(name: str) -> Path | None:
-    """Resolve ``$PARITY_TEST_DIR/l1_test_data/<name>`` if it exists.
-
-    The real writer-produced fixtures are emitted by cal-io's ignored generators
-    (`generate_l1_test_store` → synthetic_l1.zarr, `generate_multi_frontend_l1_test_store`
-    → synthetic_l1_multi.zarr); point PARITY_TEST_DIR at their output base.
-    """
-    base = os.environ.get("PARITY_TEST_DIR")
-    if not base:
-        return None
-    p = Path(base) / "l1_test_data" / name
-    return p if p.exists() else None
 
 
 @pytest.fixture(scope="module")
@@ -136,35 +118,3 @@ def test_scan_or_band_rule_is_data_driven(stores):
     assert "line" not in view_multi.group_attrs["scan_000001"]
     assert "line" in view_multi.group_attrs["scan_000001/band_0"]
     assert "line" in view_multi.group_attrs["scan_000001/band_1"]
-
-
-# ── real writer-produced stores (skipped if the fixture is absent) ─────────
-#
-# The correctness gate: a real cal-io store (not spec-emitted) must validate
-# green, so the spec's required flags match what the writer always writes.
-
-
-def test_real_single_frontend_store():
-    real = _real_store("synthetic_l1.zarr")
-    if real is None:
-        pytest.skip(
-            "real single-frontend L1 fixture absent; generate with "
-            "`cargo test -p cal-io --test generate_l1_test_store -- --ignored` "
-            "and set PARITY_TEST_DIR"
-        )
-    result = zss.check(real)
-    assert result.ok, result.errors
-    assert result.errors == []
-
-
-def test_real_multi_frontend_store():
-    real = _real_store("synthetic_l1_multi.zarr")
-    if real is None:
-        pytest.skip(
-            "real multi-frontend L1 fixture absent; generate with "
-            "`cargo test -p cal-io --test generate_multi_frontend_l1_test_store -- --ignored` "
-            "and set PARITY_TEST_DIR"
-        )
-    result = zss.check(real)
-    assert result.ok, result.errors
-    assert result.errors == []

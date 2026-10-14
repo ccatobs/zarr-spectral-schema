@@ -145,21 +145,12 @@ def _check_level(
         )
         return
 
-    # Split groups by placement so we walk each in the right target dir.
-    scan_groups_spec = {
-        name: g for name, g in groups.items() if g.get("placement") == "scan"
-    }
-    sob_groups_spec = {
-        name: g for name, g in groups.items() if g.get("placement") == "scan_or_band"
-    }
-
     for sg in scan_groups:
         bands = sorted(
             p
             for p in view.group_attrs
             if p.startswith(f"{sg}/") and _BAND_RE.match(p[len(sg) + 1 :])
         )
-        multi = bool(bands)
 
         # Per-scan-group attrs always checked at the scan group itself.
         _check_attrs(
@@ -171,34 +162,36 @@ def _check_level(
         )
 
         # Multi-frontend: per-band attrs on each band group.
-        if multi:
-            for b in bands:
-                _check_attrs(
-                    view.group_attrs.get(b, {}),
-                    level.get("band_attrs", {}),
-                    b,
-                    level_name,
-                    result,
-                )
-
-        # scan_or_band resolves to the scan group (single) or each band (multi).
-        targets = bands if multi else [sg]
-        for t in targets:
-            target_attrs = view.group_attrs.get(t, {})
+        for b in bands:
             _check_attrs(
-                target_attrs,
+                view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result
+            )
+
+        # `scan` placement resolves to the scan group; `scan_or_band` to the
+        # scan group (single-frontend) or each band (multi-frontend).
+        targets = {"scan": [sg], "scan_or_band": bands or [sg]}
+        for t in targets["scan_or_band"]:
+            _check_attrs(
+                view.group_attrs[t],
                 level.get("scan_or_band_attrs", {}),
                 t,
                 level_name,
                 result,
             )
-            for gname, group in sob_groups_spec.items():
-                _check_group_arrays(view, t, gname, group, level_name, result)
-
-        # `placement: scan` groups (L0 source/calibration) live under the scan
-        # group regardless of multi-frontend.
-        for gname, group in scan_groups_spec.items():
-            _check_group_arrays(view, sg, gname, group, level_name, result)
+        for placement, where in targets.items():
+            placed = {n: g for n, g in groups.items() if g.get("placement") == placement}
+            one_of = [n for n in level.get("one_of", []) if n in placed]
+            for t in where:
+                present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
+                if one_of and len(present) != 1:
+                    result.errors.append(
+                        f"[{level_name}] '{t}' must hold exactly one of {one_of}, "
+                        f"found {present}"
+                    )
+                for gname, group in placed.items():
+                    if gname in one_of and gname not in present:
+                        continue
+                    _check_group_arrays(view, t, gname, group, level_name, result)
 
 
 def _check_group_arrays(

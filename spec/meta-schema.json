@@ -81,6 +81,13 @@
           "description": "Root attribute whose presence marks a store as this level (e.g. l0_schema_version).",
           "type": "string"
         },
+        "one_of": {
+          "description": "Groups of which each placement target holds exactly one. Only the present group's arrays are checked; both or neither is an error.",
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
         "root_attrs": { "$ref": "#/$defs/attrs" },
         "scan_attrs": { "$ref": "#/$defs/attrs" },
         "band_attrs": { "$ref": "#/$defs/attrs" },

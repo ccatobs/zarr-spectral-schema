@@ -139,13 +139,18 @@ def _write_version_attrs(
 def emit_l0(
     out_dir: Path,
     *,
+    scans: dict[str, list[str]] | None = None,
     omit: set[str] | None = None,
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
 ) -> Path:
-    """Emit an L0 store: scan_000001/{source,calibration}/<arrays> + attrs.
+    """Emit an L0 store: scan_<N>/<group>/<arrays> + attrs.
 
+    ``scans`` maps each scan group name to the ``one_of`` groups it holds. The
+    default is one scan per ``one_of`` member (scan_000001 → source,
+    scan_000002 → calibration), the shape zarr-fits writes. Groups outside
+    ``one_of`` go into every scan.
     ``versions`` overrides the on-disk ``l0_schema_version`` (integer axis) for
     the version-negotiation fixtures while the structure stays spec-current.
     ``scan_attr_overrides`` substitutes literal scan-group attr values (for the
@@ -155,24 +160,29 @@ def emit_l0(
     omit_attrs = omit_attrs or set()
     spec = load_spec()
     level = _level_for(spec, "l0_schema_version")
+    one_of = level.get("one_of", [])
+    if scans is None:
+        scans = {f"scan_{i:06d}": [g] for i, g in enumerate(one_of, start=1)} or {_SCAN: []}
 
     root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
     _write_version_attrs(root, spec, "L0", versions or {})
     _write_attrs(root, level.get("root_attrs", {}), omit_attrs, emit_optional=True)
 
-    scan = root.require_group(_SCAN)
-    _write_attrs(
-        scan,
-        level.get("scan_attrs", {}),
-        omit_attrs,
-        emit_optional=True,
-        overrides=scan_attr_overrides,
-    )
-
-    # L0 has two `placement: scan, inline: false` sub-groups (source/calibration).
-    for gname, gspec in level.get("groups", {}).items():
-        sub = scan.require_group(gname)
-        _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, emit_optional=True)
+    for scan_name, chosen in scans.items():
+        scan = root.require_group(scan_name)
+        _write_attrs(
+            scan,
+            level.get("scan_attrs", {}),
+            omit_attrs,
+            emit_optional=True,
+            overrides=scan_attr_overrides,
+        )
+        # L0 groups are `placement: scan, inline: false` sub-groups.
+        for gname, gspec in level.get("groups", {}).items():
+            if gname in one_of and gname not in chosen:
+                continue
+            sub = scan.require_group(gname)
+            _write_arrays(sub, gspec, f"{scan_name}/{gname}", omit, emit_optional=True)
     return out_dir
 
 
@@ -309,6 +319,18 @@ L0_VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
 }
 
 
+def emit_real_output_fixtures(out: Path) -> None:
+    """Fixtures for #18 (accept real producer output, reject broken output).
+
+    Both bindings validate these same stores: the Python tests call this
+    function, the Rust tests run ``main()``.
+    """
+    one_of = _level_for(load_spec(), "l0_schema_version")["one_of"]
+    # A scan holds exactly one of the one_of groups: both, or neither, is an error.
+    emit_l0(out / "l0_both_groups.zarr", scans={_SCAN: list(one_of)})
+    emit_l0(out / "l0_no_group.zarr", scans={_SCAN: []})
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("usage: python conformance/generate.py <out_dir>", file=sys.stderr)
@@ -347,6 +369,8 @@ def main() -> None:
     print(f"emitted: {out/'l0_pre6.zarr'}")
     print(f"emitted: {out/'l0_bad_raw_attrs.zarr'}")
     print(f"emitted: {out/'l0_bad_pixels_per_array.zarr'}")
+
+    emit_real_output_fixtures(out)
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.

@@ -1,0 +1,29 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "axis_order": "channels, dumps, receivers, arrays, subscans",
+    "n_channels": 16384,
+    "max_dumps": 1,
+    "n_receivers": 1,
+    "n_arrays": 1,
+    "n_subscans": 2,
+    "arrays": [
+      "HFAV"
+    ],
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "subscan_numbers": [
+      2,
+      3
+    ],
+    "frontend_backends": [
+      "HFAV_PX00_S"
+    ],
+    "fill_value_int32": -2147483648,
+    "chunk_strategy": "(min(1024,C), D, R, A, 1) = (1024, 1, 1, 1, 1)"
+  }
+}
