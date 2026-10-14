@@ -106,6 +106,7 @@ def _write_arrays(
     omit: set[str],
     emit_optional: bool,
     array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> None:
     """Create a group's arrays under ``parent``.
 
@@ -114,7 +115,11 @@ def _write_arrays(
     (the fixtures emit a realistic subset so optional-present paths are exercised).
     An array family (``prefix``) is emitted as its first member ``<prefix>0``.
     ``array_overrides`` maps a store-relative path to ``dtype``/``ndim`` values
-    that replace the declared ones (wrong-typed negatives).
+    that replace the declared ones (wrong-typed negatives), and ``attr_values``
+    to literal array attr values. ``sharded`` writes every axis with length 2
+    and a chunk layout other than the writer default: 5-D arrays (C, D, R, A, S)
+    get the recommended one shard per pixel and subscan (C, D, 1, 1, 1) with
+    inner chunks (C/2, D, 1, 1, 1); the other arrays one chunk per element.
     """
     array_overrides = array_overrides or {}
     for array_name, aspec in group_spec.get("arrays", {}).items():
@@ -125,8 +130,20 @@ def _write_arrays(
         if not aspec.get("required", False) and not emit_optional:
             continue
         aspec = {**aspec, **array_overrides.get(rel, {})}
-        shape = tuple([1] * aspec["ndim"])
-        parent.create_array(name=name, shape=shape, dtype=aspec["dtype"])
+        ndim = aspec["ndim"]
+        layout = {"shape": (1,) * ndim}
+        if sharded:
+            layout = {"shape": (2,) * ndim, "chunks": (1,) * ndim}
+            if ndim == 5:
+                layout.update(shards=(2, 2, 1, 1, 1), chunks=(1, 2, 1, 1, 1))
+        # A dtype set (#20): write its first name, as the producers do by default.
+        dtype = (
+            aspec["dtype"][0] if isinstance(aspec["dtype"], list) else aspec["dtype"]
+        )
+        arr = parent.create_array(name=name, dtype=dtype, **layout)
+        _write_attrs(
+            arr, aspec.get("attrs", {}), set(), emit_optional, aspec.get("attr_values")
+        )
 
 
 def _write_version_attrs(
@@ -163,6 +180,8 @@ def emit_l0(
     omit_attrs: set[str] | None = None,
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
+    array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> Path:
     """Emit an L0 store: scan_<N>/<group>/<arrays> + attrs.
 
@@ -203,7 +222,9 @@ def emit_l0(
             if gname in one_of and gname not in chosen:
                 continue
             sub = scan.require_group(gname)
-            _write_arrays(sub, gspec, f"{scan_name}/{gname}", omit, emit_optional=True)
+            _write_arrays(
+                sub, gspec, f"{scan_name}/{gname}", omit, True, array_overrides, sharded
+            )
     return out_dir
 
 
@@ -215,6 +236,7 @@ def emit_l1_single(
     versions: dict[str, str | int] | None = None,
     scan_attr_overrides: dict | None = None,
     array_overrides: dict[str, dict] | None = None,
+    sharded: bool = False,
 ) -> Path:
     """Emit an L1 single-frontend store: scan_000001/<arrays> directly.
 
@@ -248,10 +270,12 @@ def emit_l1_single(
         if gspec.get("placement") != "scan_or_band":
             continue
         if gspec.get("inline", False):
-            _write_arrays(scan, gspec, _SCAN, omit, True, array_overrides)
+            _write_arrays(scan, gspec, _SCAN, omit, True, array_overrides, sharded)
         else:
             sub = scan.require_group(gname)
-            _write_arrays(sub, gspec, f"{_SCAN}/{gname}", omit, True, array_overrides)
+            _write_arrays(
+                sub, gspec, f"{_SCAN}/{gname}", omit, True, array_overrides, sharded
+            )
     return out_dir
 
 
@@ -446,6 +470,78 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
 
 
+# source_l0_store values (#20) → (on-disk value, conformant?). Both bindings check
+# the same verdicts (test_storage_contract.py, storage_contract.rs).
+SOURCE_L0_STORE_FIXTURES: dict[str, tuple[str, bool]] = {
+    "l1_l0_store_relative.zarr": ("../../zarr/SOFIA_UPGREAT_ORION_KL.zarr", True),
+    "l1_l0_store_s3.zarr": ("s3://ccat-archive/zarr/scan%20set.zarr", True),
+    "l1_l0_store_abs_path.zarr": ("/data/zarr/SOFIA_UPGREAT_ORION_KL.zarr", False),
+    "l1_l0_store_empty.zarr": ("", False),
+    "l1_l0_store_space.zarr": ("../zarr/my store.zarr", False),
+    "l1_l0_store_backslash.zarr": ("..\\zarr\\x.zarr", False),
+    "l1_l0_store_bad_escape.zarr": ("../zarr/x%zz.zarr", False),
+    "l1_l0_store_non_ascii.zarr": ("../zarr/m\u00fcnchen.zarr", False),
+}
+
+
+def emit_storage_fixtures(out: Path) -> None:
+    """Fixtures for #20 (object storage and production volume).
+
+    Both bindings validate these same stores: the Python tests call this
+    function, the Rust tests run ``main()``.
+    """
+    # Chunk independence: a store with a chunk layout other than the writer
+    # default (the recommended one shard per pixel and subscan) is conformant.
+    emit_l0(out / "l0_sharded.zarr", sharded=True)
+    emit_l1_single(out / "l1_sharded.zarr", sharded=True)
+    # L1 spectra and t_sys accept float32 as well as float64.
+    for dtype in ("float32", "float64"):
+        emit_l1_single(
+            out / f"l1_{dtype}.zarr",
+            array_overrides={
+                f"{_SCAN}/spectra": {"dtype": dtype},
+                f"{_SCAN}/t_sys": {"dtype": dtype},
+            },
+        )
+    # An integer dtype is outside the set.
+    emit_l1_single(
+        out / "l1_int16_spectra.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"dtype": "int16"}},
+    )
+    # keepbits (the bit rounding a writer applied) is an integer where present.
+    emit_l1_single(
+        out / "l1_keepbits.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": 12}}},
+    )
+    emit_l1_single(
+        out / "l1_bad_keepbits.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": "12"}}},
+    )
+    # The valid dump count per subscan is int32 [S] where present.
+    bad = {"dtype": "float64", "ndim": 2}
+    emit_l0(
+        out / "l0_bad_valid_dumps.zarr",
+        array_overrides={f"{_SCAN}/source/n_valid_dumps": bad},
+    )
+    emit_l1_single(
+        out / "l1_bad_valid_dumps.zarr",
+        array_overrides={f"{_SCAN}/n_valid_dumps": bad},
+    )
+    # The local walk does not follow a symlinked directory: scan_000002 links
+    # to a scan without spectra, and the store stays green.
+    emit_l1_single(out / "l1_symlink_target.zarr", omit={f"{_SCAN}/spectra"})
+    store = emit_l1_single(out / "l1_symlinked_scan.zarr")
+    (store / "scan_000002").symlink_to(
+        Path("..") / "l1_symlink_target.zarr" / _SCAN, target_is_directory=True
+    )
+    # A local path is a path: `::` and `name:` in it are not URL syntax.
+    emit_l1_single(out / "colon_dir" / "miss_array.zarr", omit={f"{_SCAN}/spectra"})
+    (out / "colon_dir").rename(out / "a::b")
+    # source_l0_store holds an RFC 3986 URI reference, never an absolute path.
+    for name, (value, _ok) in SOURCE_L0_STORE_FIXTURES.items():
+        emit_l1_single(out / name, scan_attr_overrides={"source_l0_store": value})
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("usage: python conformance/generate.py <out_dir>", file=sys.stderr)
@@ -486,6 +582,7 @@ def main() -> None:
     print(f"emitted: {out / 'l0_bad_pixels_per_array.zarr'}")
 
     emit_real_output_fixtures(out)
+    emit_storage_fixtures(out)
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.

@@ -15,8 +15,9 @@ Three checks today:
   arrays/attrs, the L0 ``source``/``calibration`` sub-groups, and the diagnostic
   ``skydiff``/``skychopdiff`` sub-groups are all resolved by the same generic
   walk — never hand-branched per field. The spec's ``one_of`` (exactly one of
-  these groups per target), ``equals`` (attr value constraint) and ``prefix``
-  (array family) fields are interpreted the same way. Every structure finding
+  these groups per target), ``equals`` (attr value constraint), ``format``
+  (``uri-reference``), ``prefix`` (array family), dtype sets and array ``attrs``
+  are interpreted the same way. Every structure finding
   starts with ``[<level>] ``; version and level-detection errors do not.
 * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
   (``l0_schema_version`` integer, ``cal_schema_version`` ``major.minor``) is
@@ -47,6 +48,9 @@ _SCAN_PATTERN = "^scan_[0-9]{6,}$"
 _SCAN_RE = re.compile(_SCAN_PATTERN)
 _BAND_RE = re.compile(r"band_[0-9]+")
 _VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
+# RFC 3986 URI reference (ASCII; a % starts a two-hex-digit escape); a leading
+# "/" (absolute path) is excluded: it names a file on one host only.
+_URI_REFERENCE_RE = re.compile(r"(?!/)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+")
 
 # Map a spec attr ``type`` to the Python types it may appear as in parsed JSON.
 # `number` admits int; `integer` excludes bool (bool is an int subclass in JSON).
@@ -240,7 +244,7 @@ def _check_group_arrays(
 def _check_array(
     view: StoreView, rel: str, aspec: dict, level_name: str, result: ValidationResult
 ) -> None:
-    """Check one array path: node type, presence (if required), dtype and ndim."""
+    """Check one array path: node type, presence (if required), dtype, ndim, attrs."""
     if rel in view.group_attrs:
         result.errors.append(f"[{level_name}] '{rel}' is a group, expected an array")
         return
@@ -249,7 +253,8 @@ def _check_array(
         if aspec.get("required", False):
             result.errors.append(f"[{level_name}] required array '{rel}' is missing")
         return
-    if arr.dtype != aspec["dtype"]:
+    allowed = aspec["dtype"] if isinstance(aspec["dtype"], list) else [aspec["dtype"]]
+    if arr.dtype not in allowed:
         result.errors.append(
             f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )
@@ -257,6 +262,7 @@ def _check_array(
         result.errors.append(
             f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
         )
+    _check_attrs(arr.attrs, aspec.get("attrs", {}), rel, level_name, result)
 
 
 def _check_attrs(
@@ -269,8 +275,8 @@ def _check_attrs(
     """Check declared attrs at one placement location.
 
     Required attrs must be present and (if present) type-checked; optional attrs
-    are type-checked only when present. An ``equals`` value constraint is checked
-    after the type. ``where`` is the store path used in
+    are type-checked only when present. An ``equals`` value constraint and a
+    ``format`` are checked after the type. ``where`` is the store path used in
     messages (``root`` or a group path) so failures point at the exact location.
     """
     for name, aspec in declared.items():
@@ -293,6 +299,14 @@ def _check_attrs(
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must equal "
                 f"{json.dumps(aspec['equals'])}, got {json.dumps(attrs[name])}"
+            )
+        elif aspec.get("format") == "uri-reference" and not _URI_REFERENCE_RE.fullmatch(
+            attrs[name]
+        ):
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must be a URI reference "
+                f"(RFC 3986) and not an absolute path, got "
+                f"{json.dumps(attrs[name], ensure_ascii=False)}"
             )
 
 

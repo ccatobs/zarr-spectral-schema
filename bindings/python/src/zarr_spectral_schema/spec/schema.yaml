@@ -28,13 +28,67 @@
 # an error. Versions and scan/band names are ASCII digits only. Every structure
 # finding starts with "[<level>] "; version and level-detection errors do not.
 #
+# ── Storage rules (#20, ADR-0008) ──
+#
+# Object storage. A store is a local path or an object-store URL
+# (s3://bucket/store.zarr). An argument that starts with scheme:// is a URL, and
+# its path is percent-decoded; anything else is a local path, taken as it is.
+# Both validators read only zarr.json objects: they list the children of each
+# group node and stop at an array node, so they never list or open a chunk key.
+# A directory without a zarr.json is not a node, and the local walk does not
+# follow a symlinked directory. An I/O failure is an error, never a gap: a
+# group that cannot be listed is "'<rel>/': cannot list", a zarr.json that
+# cannot be read is "'<rel>': cannot read metadata" ([<level>] structure
+# findings; at the root, the only error).
+#
+# Chunk independence (invariant). A reader gives the same result for any chunk
+# shape and any shard shape. The contract states no chunk rule; a reader that
+# depends on the chunk shape of one writer breaks this invariant. The
+# conformance set holds l0_sharded.zarr and l1_sharded.zarr, whose chunk layout
+# differs from the writer default.
+#
+# Recommended layout (non-binding; binds no producer). For each 5-D array
+# (C, D, R, A, S): one shard per pixel and subscan, shard shape (C, D, 1, 1, 1),
+# with inner chunks of about 1 MB uncompressed (0.5 to 4 MB; e.g. (C, 4, 1, 1, 1)
+# for 64k float32 channels, (C, 2, 1, 1, 1) for float64). Shard target: 16 MB to
+# 512 MB uncompressed; when one pixel and subscan exceeds 512 MB, split D into
+# equal parts. Why: a reader of one pixel or one subscan fetches one object, an
+# inner chunk is the unit of a ranged read, a writer holds one shard in memory,
+# and an object store charges per request (objects far below 1 MB make reads
+# request-bound). One shard per array, as written today, gives one 403 GB
+# spectra object for a 10-minute OTF scan of 2x64 pixels, 64k channels at 10 Hz.
+#
+# Consolidated metadata (decision). A finished store MAY hold consolidated
+# metadata: zarr-python's inline form (`consolidated_metadata` with
+# kind: inline, must_understand: false) in the root zarr.json, written by the
+# producer as its last write, after every completeness marker. It is
+# recommended for a finished store read with zarr-python over object storage
+# (one GET instead of one listing per group and one GET per node). It is never
+# required and never authoritative: the validators ignore it and check each
+# node's own zarr.json, and a reader that uses it still skips a unit without
+# its completeness marker. Why not required: it is a zarr-python convention,
+# not part of the Zarr v3 core spec; zarrs 0.23 (calibrate) writes it
+# (Node::consolidate_metadata + Group::set_consolidated_metadata, verified to
+# open with zarr.open_consolidated) but does not read it; a streaming store
+# gains units after each write, so a root cache is stale between appends; and
+# no real store holds it, so a requirement would reject every existing store.
+#
+# One writer per store (ADR-0008 amendment). One producer writes a store:
+# zarr-fits writes an L0 store, calibrate writes an L1 store. A consumer (YODA)
+# writes no group into the store of a producer; it writes its output to a store
+# of its own. A link from one store to another (source_l0_store) is a URI
+# reference.
+#
 # Codegen rule (build.rs): each array/group/version yields a Rust `pub const`.
 # Default identifier: array → UPPER(on-disk name); group → UPPER(name)_GROUP;
 # version → UPPER(attr key). Override with `const:`; suppress a group const with
 # `const: false`. `lists:`/`markers:` yield `&[&str]`/`&str` consts directly.
 # The new group fields (placement/inline) and the `*_attrs` sections generate NO
 # consts — they are validator data only. An attr may carry `equals: <value>`
-# (value constraint): when present, the attr must hold exactly that value.
+# (value constraint): when present, the attr must hold exactly that value; and
+# `format: uri-reference` (RFC 3986 URI reference, not empty, not an absolute
+# path). An array entry may carry `attrs` (the array's own attrs, same rules)
+# and a dtype set (`dtype: [float64, float32]`: any name of the set).
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
 spec_version: "0.1.0"
@@ -171,6 +225,10 @@ levels:
           # record carries a FITS LOAD_TEMP_ARRAY (HFA HOT/COLD) → required:false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
           load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
+          # Valid dump count per subscan [S] (#20): zarr-fits pads the dump axis
+          # D of each subscan to the longest subscan; dumps 0..n-1 of subscan s
+          # hold data, the rest is fill. Absent ⇒ a reader takes every dump.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
       calibration:              # → const CALIBRATION_GROUP
         # L0 obs sub-group: arrays under scan_<N>/calibration/ (inline:false).
         placement: scan
@@ -202,6 +260,7 @@ levels:
           # here (the writer's geometry block is source-only). Conditional → false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, required: false }
           load_temp_img_5d: { dtype: float64, ndim: 5, required: false }
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }   # [S], as in source
   L1:
     # A store is L1 iff its root group carries this attr (slice-4 detection).
     detect: cal_schema_version
@@ -232,7 +291,14 @@ levels:
       qa:                   { type: object,  required: true }
       mjd:                  { type: number,  required: false }
       cal_hash:             { type: string,  required: false }
-      source_l0_store:      { type: string,  required: false }
+      # The L0 store this L1 store was calibrated from (#20): an RFC 3986 URI
+      # reference — an absolute URI (s3://bucket/x.zarr) or a relative reference
+      # resolved against the URI of this L1 store, its root taken as a directory
+      # (../../zarr/x.zarr). A relative reference survives copying the L0 and L1
+      # stores together (site-to-data-center replication); file:/// would tie
+      # the link to one host. An empty value, a character outside RFC 3986 and
+      # an absolute POSIX path (/data/x.zarr) are errors.
+      source_l0_store:      { type: string,  required: false, format: uri-reference }
       source_l0_scans:      { type: object,  required: false }
       cal_config:           { type: object,  required: false }
       processing_timestamp: { type: string,  required: false }
@@ -276,8 +342,12 @@ levels:
         inline: true
         arrays:
           # Always written (calibrated.rs:358-476).
-          spectra:      { dtype: float64, ndim: 5, required: true }   # calibrated T; C,D,R,A,S
-          t_sys:        { dtype: float64, ndim: 4, required: true }   # C,R,A,S
+          # spectra and t_sys take float64 (calibrate today) or float32
+          # (kalibrate#93): a dtype set (#20). A writer that rounds the mantissa
+          # (bit rounding) records the kept mantissa bits in the array attr
+          # `keepbits`; absent ⇒ no rounding.
+          spectra:      { dtype: [float64, float32], ndim: 5, required: true, attrs: { keepbits: { type: integer, required: false } } }   # calibrated T; C,D,R,A,S
+          t_sys:        { dtype: [float64, float32], ndim: 4, required: true, attrs: { keepbits: { type: integer, required: false } } }   # C,R,A,S
           t_int:        { dtype: float64, ndim: 1, required: true }   # [S]
           t_off:        { dtype: float64, ndim: 1, required: true }   # [S] OFF integ time
           t_rec_ssb:    { dtype: float64, ndim: 3, required: true }   # C,R,A
@@ -299,6 +369,9 @@ levels:
           otf_airmass:      { dtype: float64, ndim: 2, required: false }
           pixel_offset_lon: { dtype: float64, ndim: 3, required: false }
           pixel_offset_lat: { dtype: float64, ndim: 3, required: false }
+          # Valid dump count per subscan [S] (#20): spectra keeps the padded D
+          # axis of L0, so the L0 count carries over.
+          n_valid_dumps:    { dtype: int32,   ndim: 1, required: false }
       skydiff:                  # → const SKYDIFF_GROUP
         # Diagnostic sub-group under the scan/band group (diagnostic modes only).
         placement: scan_or_band

@@ -36,4 +36,6 @@ jobs:
           python-version: "3.12"
       - run: pip install ./bindings/python[emit]
       - run: make sync
+      # Local stores only (calibrate's build), then with s3:// support.
       - run: cd bindings/rust && cargo test
+      - run: cd bindings/rust && cargo test --features s3

@@ -21,8 +21,8 @@
 //!   arrays/attrs, the L0 `source`/`calibration` sub-groups, and the diagnostic
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
 //!   The spec's `one_of` (exactly one of these groups per target), `equals`
-//!   (attr value constraint) and `prefix` (array family) fields are interpreted
-//!   the same way. Every structure finding starts with `[<level>] `; version and
+//!   (attr value constraint), `format` (`uri-reference`), `prefix` (array
+//!   family), dtype sets and array `attrs` are interpreted the same way. Every structure finding starts with `[<level>] `; version and
 //!   level-detection errors do not (calibrate splits on this prefix, kalibrate#82).
 //! * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
 //!   is range-checked against the spec's supported window (`min_supported` ..
@@ -35,7 +35,7 @@
 //! [`ValidationResult`] with warnings.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -80,6 +80,9 @@ struct AttrSpec {
     /// Value constraint: the attr must hold exactly this value.
     #[serde(default)]
     equals: Option<Value>,
+    /// String format constraint (`uri-reference`).
+    #[serde(default)]
+    format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -93,12 +96,41 @@ struct Group {
 
 #[derive(Deserialize)]
 struct ArraySpec {
-    dtype: String,
+    dtype: Dtype,
     ndim: usize,
     required: bool,
+    /// Attributes of the array itself (e.g. `keepbits`).
+    #[serde(default)]
+    attrs: BTreeMap<String, AttrSpec>,
     /// Array family: matches every array whose name starts with this prefix.
     #[serde(default)]
     prefix: Option<String>,
+}
+
+/// One dtype name, or a set of names the array may take (#20).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Dtype {
+    One(String),
+    Set(Vec<String>),
+}
+
+impl Dtype {
+    fn allows(&self, dtype: &str) -> bool {
+        match self {
+            Dtype::One(d) => d == dtype,
+            Dtype::Set(set) => set.iter().any(|d| d == dtype),
+        }
+    }
+}
+
+impl std::fmt::Display for Dtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dtype::One(d) => write!(f, "{d:?}"),
+            Dtype::Set(set) => write!(f, "{set:?}"),
+        }
+    }
 }
 
 /// Outcome of validating a store: hard `errors` and advisory `warnings`.
@@ -121,8 +153,8 @@ impl ValidationResult {
 struct StoreView {
     root_attrs: Map<String, Value>,
     groups: BTreeMap<String, Map<String, Value>>,
-    /// path → (dtype name, ndim)
-    arrays: BTreeMap<String, (String, usize)>,
+    /// path → (dtype name, ndim, attributes)
+    arrays: BTreeMap<String, (String, usize, Map<String, Value>)>,
     /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
     errors: Vec<String>,
 }
@@ -141,6 +173,12 @@ pub fn validate(store: &Path) -> Vec<String> {
 }
 
 /// Validate a Zarr v3 store against the spec, returning errors and warnings.
+///
+/// `store` is a local path or, with the `s3` feature, a URL
+/// (`Path::new("s3://bucket/store.zarr")`). An S3 store takes its endpoint,
+/// region and credentials from the standard `AWS_*` environment variables; its
+/// check blocks on a runtime of its own, so do not call it from inside a tokio
+/// runtime. A local check reads with `std::fs` and needs no runtime.
 pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
     let mut result = ValidationResult::default();
@@ -338,7 +376,7 @@ fn check_group_arrays(
     }
 }
 
-/// Check one array path: node type, presence (if required), dtype and ndim.
+/// Check one array path: node type, presence (if required), dtype, ndim, attrs.
 fn check_array(
     view: &StoreView,
     rel: &str,
@@ -352,7 +390,7 @@ fn check_array(
         ));
         return;
     }
-    let Some((dtype, ndim)) = view.arrays.get(rel) else {
+    let Some((dtype, ndim, attrs)) = view.arrays.get(rel) else {
         if aspec.required {
             result
                 .errors
@@ -360,9 +398,9 @@ fn check_array(
         }
         return;
     };
-    if *dtype != aspec.dtype {
+    if !aspec.dtype.allows(dtype) {
         result.errors.push(format!(
-            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
+            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {}",
             aspec.dtype
         ));
     }
@@ -372,12 +410,13 @@ fn check_array(
             aspec.ndim
         ));
     }
+    check_attrs(attrs, &aspec.attrs, rel, level_name, result);
 }
 
 /// Check declared attrs at one placement location (`where_` is the store path
 /// used in messages). Required attrs must be present and (if present)
 /// type-checked; optional attrs are type-checked only when present. An `equals`
-/// value constraint is checked after the type.
+/// value constraint and a `format` are checked after the type.
 fn check_attrs(
     attrs: &Map<String, Value>,
     declared: &BTreeMap<String, AttrSpec>,
@@ -403,6 +442,13 @@ fn check_attrs(
         } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must equal {equals}, got {value}"
+            ));
+        } else if aspec.format.as_deref() == Some("uri-reference")
+            && !value.as_str().is_some_and(is_uri_reference)
+        {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be a URI reference \
+                 (RFC 3986) and not an absolute path, got {value}"
             ));
         }
     }
@@ -523,6 +569,30 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
     Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
+/// An RFC 3986 URI reference (ASCII; a `%` starts a two-hex-digit escape), not
+/// empty and not an absolute path: a leading `/` names a file on one host only.
+/// Parity with the Python `_URI_REFERENCE_RE`.
+fn is_uri_reference(value: &str) -> bool {
+    let allowed = |c: u8| c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c);
+    let mut rest = value.as_bytes();
+    if rest.is_empty() || rest[0] == b'/' {
+        return false;
+    }
+    while let Some((&c, tail)) = rest.split_first() {
+        if c == b'%' {
+            if !(tail.len() >= 2 && tail[0].is_ascii_hexdigit() && tail[1].is_ascii_hexdigit()) {
+                return false;
+            }
+            rest = &tail[2..];
+        } else if allowed(c) {
+            rest = tail;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
 /// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).
 const SCAN_PATTERN: &str = "^scan_[0-9]{6,}$";
 
@@ -543,76 +613,224 @@ fn is_band(name: &str) -> bool {
 // non-finite number (`NaN`, `Infinity`, `-Infinity`) is its own error; any other
 // unparseable `zarr.json` is a malformed-metadata error. The node is then left
 // out of the view.
+//
+// Object storage (#20). One input grammar in both bindings: an argument that
+// starts with `scheme://` is a URL, read through `object_store` (feature `s3`),
+// and its path is percent-decoded. Anything else is a local path, read with
+// `std::fs`. Both backends serve one walk: it reads only `zarr.json` objects,
+// lists the children of each group node and stops at an array node, so it
+// never lists or opens a chunk key. A directory without a `zarr.json` is not a
+// node, and the local walk does not follow a symlinked directory. An I/O
+// failure is an error of its own, never a gap: a failed listing is
+// `'<rel>/': cannot list`, a failed read of a `zarr.json` is
+// `'<rel>': cannot read metadata`.
+
+/// Where the walk reads a store: list the child directories of a node, read
+/// the `zarr.json` of a node.
+trait Backend {
+    /// A node: a directory path, or an object-store key prefix.
+    type Loc;
+    /// The child directories of `dir` with their names, sorted by name.
+    fn children(&self, dir: &Self::Loc) -> Result<Vec<(String, Self::Loc)>, ()>;
+    /// The `zarr.json` of `dir`: `Ok(None)` when absent, `Err` when unreadable.
+    fn zarr_json(&self, dir: &Self::Loc) -> Result<Option<Vec<u8>>, ()>;
+}
+
+/// A local directory tree, read with `std::fs`.
+struct Fs;
+
+impl Backend for Fs {
+    type Loc = PathBuf;
+
+    fn children(&self, dir: &PathBuf) -> Result<Vec<(String, PathBuf)>, ()> {
+        let mut children = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(drop)? {
+            let entry = entry.map_err(drop)?;
+            // file_type() does not follow a symlink: a symlinked directory is skipped.
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                children.push((name, entry.path()));
+            }
+        }
+        children.sort();
+        Ok(children)
+    }
+
+    fn zarr_json(&self, dir: &PathBuf) -> Result<Option<Vec<u8>>, ()> {
+        match std::fs::read(dir.join("zarr.json")) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+/// An object store behind a URL, with a runtime to block on its futures.
+#[cfg(feature = "s3")]
+struct Obj {
+    rt: tokio::runtime::Runtime,
+    store: Box<dyn object_store::ObjectStore>,
+}
+
+#[cfg(feature = "s3")]
+impl Obj {
+    /// Open a URL; return the backend and the key of the store root.
+    fn open(url: &str) -> Result<(Self, object_store::path::Path), String> {
+        let parsed = url::Url::parse(url).map_err(|e| format!("{url}: {e}"))?;
+        // Endpoint, region and credentials come from AWS_*; a variable that is
+        // not UTF-8 is skipped.
+        let aws_env = std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .filter(|(k, _)| k.starts_with("AWS_"));
+        let (store, root) =
+            object_store::parse_url_opts(&parsed, aws_env).map_err(|e| format!("{url}: {e}"))?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("{url}: {e}"))?;
+        Ok((Self { rt, store }, root))
+    }
+}
+
+#[cfg(feature = "s3")]
+impl Backend for Obj {
+    type Loc = object_store::path::Path;
+
+    fn children(&self, dir: &Self::Loc) -> Result<Vec<(String, Self::Loc)>, ()> {
+        let list = self
+            .rt
+            .block_on(self.store.list_with_delimiter(Some(dir)))
+            .map_err(drop)?;
+        let mut children: Vec<(String, Self::Loc)> = list
+            .common_prefixes
+            .into_iter()
+            .filter_map(|p| Some((p.filename()?.to_string(), p.clone())))
+            .collect();
+        children.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(children)
+    }
+
+    fn zarr_json(&self, dir: &Self::Loc) -> Result<Option<Vec<u8>>, ()> {
+        use object_store::ObjectStoreExt;
+        let key = dir.clone().join("zarr.json");
+        let get = async { self.store.get(&key).await?.bytes().await };
+        match self.rt.block_on(get) {
+            Ok(bytes) => Ok(Some(bytes.to_vec())),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+fn not_group(store: &Path) -> String {
+    format!(
+        "{}: not a Zarr v3 group (missing/!group root zarr.json)",
+        store.display()
+    )
+}
+
+/// `scheme://…` (scheme: an ASCII letter, then letters, digits, `+`, `.`, `-`).
+/// Parity with the Python `_URL_RE`.
+fn is_url(s: &str) -> bool {
+    s.split_once("://").is_some_and(|(scheme, _)| {
+        scheme
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic())
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
+    })
+}
 
 /// Walk a Zarr v3 store and normalize every node keyed by relative path.
 /// Fails only when the root is not a readable Zarr v3 group.
 fn read_store(store: &Path) -> Result<StoreView, String> {
-    let not_group = || {
-        format!(
-            "{}: not a Zarr v3 group (missing/!group root zarr.json)",
-            store.display()
-        )
-    };
-    let root = read_meta(&store.join("zarr.json"), "zarr.json")?.ok_or_else(not_group)?;
-    if root.get("node_type").and_then(Value::as_str) != Some("group") {
-        return Err(not_group());
+    match store.to_str().filter(|s| is_url(s)) {
+        None => read_with(&Fs, store.to_path_buf(), store),
+        #[cfg(feature = "s3")]
+        Some(url) => {
+            let (backend, root) = Obj::open(url)?;
+            read_with(&backend, root, store)
+        }
+        #[cfg(not(feature = "s3"))]
+        Some(_) => Err(format!("{}: s3:// needs the `s3` feature", store.display())),
+    }
+}
+
+fn read_with<B: Backend>(backend: &B, root: B::Loc, store: &Path) -> Result<StoreView, String> {
+    let meta = read_meta(backend, &root, "zarr.json")?.ok_or_else(|| not_group(store))?;
+    if meta.get("node_type").and_then(Value::as_str) != Some("group") {
+        return Err(not_group(store));
     }
     let mut view = StoreView {
-        root_attrs: attributes(&root),
+        root_attrs: attributes(&meta),
         ..StoreView::default()
     };
-    walk(store, store, &mut view);
+    walk(backend, &root, "", &mut view)?; // a root that cannot be listed fails the read
     Ok(view)
 }
 
-/// Recurse below `dir`, recording each child node that holds a `zarr.json`.
-fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-            continue;
-        }
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(root)
-            .expect("walked path lies under the store root")
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        match read_meta(&path.join("zarr.json"), &format!("{rel}/zarr.json")) {
+/// Record each child node of the group at `dir` (`rel` in the store); recurse
+/// into child groups. `Err` when `dir` cannot be listed; a child group that
+/// cannot be listed is an error in `view.errors`.
+///
+/// ponytail: one request at a time; fetch siblings concurrently if a large
+/// store on object storage makes the walk slow.
+fn walk<B: Backend>(
+    backend: &B,
+    dir: &B::Loc,
+    rel: &str,
+    view: &mut StoreView,
+) -> Result<(), String> {
+    let children = backend
+        .children(dir)
+        .map_err(|()| format!("'{rel}/': cannot list"))?;
+    for (name, child) in children {
+        let rel = if rel.is_empty() {
+            name
+        } else {
+            format!("{rel}/{name}")
+        };
+        match read_meta(backend, &child, &format!("{rel}/zarr.json")) {
             Err(e) => view.errors.push(e),
             Ok(None) => {}
             Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
                 Some("group") => {
-                    view.groups.insert(rel, attributes(&meta));
+                    view.groups.insert(rel.clone(), attributes(&meta));
+                    if let Err(e) = walk(backend, &child, &rel, view) {
+                        view.errors.push(e);
+                    }
                 }
                 Some("array") => {
                     let ndim = meta
                         .get("shape")
                         .and_then(Value::as_array)
                         .map_or(0, Vec::len);
-                    view.arrays
-                        .insert(rel, (dtype_name(meta.get("data_type")), ndim));
+                    view.arrays.insert(
+                        rel,
+                        (dtype_name(meta.get("data_type")), ndim, attributes(&meta)),
+                    );
                 }
                 _ => {}
             },
         }
-        walk(root, &path, view);
     }
+    Ok(())
 }
 
-/// Parse one `zarr.json`: `Ok(None)` when absent, `Err` naming `rel` when it
-/// does not parse to a JSON object.
-fn read_meta(path: &Path, rel: &str) -> Result<Option<Map<String, Value>>, String> {
-    if !path.is_file() {
-        return Ok(None);
-    }
-    let text = std::fs::read(path)
-        .ok()
-        .and_then(|b| String::from_utf8(b).ok());
+/// Parse the `zarr.json` of `dir`: `Ok(None)` when absent, `Err` naming `rel`
+/// when it cannot be read or does not parse to a JSON object.
+fn read_meta<B: Backend>(
+    backend: &B,
+    dir: &B::Loc,
+    rel: &str,
+) -> Result<Option<Map<String, Value>>, String> {
+    let text = match backend.zarr_json(dir) {
+        Ok(None) => return Ok(None),
+        Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
+        Err(()) => return Err(format!("'{rel}': cannot read metadata")),
+    };
     match text.as_deref().map(serde_json::from_str::<Value>) {
         Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
         Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {

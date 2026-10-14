@@ -40,6 +40,38 @@ def test_real_spec_passes_meta_schema():
             ].__setitem__("dtype", "complex128"),
             id="unknown-dtype",
         ),
+        # #20: a dtype set holds known names only, and at least one.
+        pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"][
+                "spectra"
+            ].__setitem__("dtype", ["float32", "complex128"]),
+            id="unknown-dtype-in-set",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"][
+                "spectra"
+            ].__setitem__("dtype", []),
+            id="empty-dtype-set",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"]["spectra"]["attrs"][
+                "keepbits"
+            ].__setitem__("type", "int"),
+            id="array-attr-unknown-type",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+                "format", "uri"
+            ),
+            id="unknown-attr-format",
+        ),
+        # A format constrains a string: on any other type it is a spec error.
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+                "type", "integer"
+            ),
+            id="format-on-non-string-attr",
+        ),
         pytest.param(
             lambda s: s["versions"]["l0_schema_version"].__setitem__(
                 "on_disk", "float"
