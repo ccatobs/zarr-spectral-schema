@@ -69,3 +69,18 @@ def test_valid_dump_count_dtype_and_dims_are_checked(stores, name, rel):
     errors = zss.validate(stores / name)
     assert any(rel in e and "dtype" in e for e in errors), errors
     assert any(rel in e and "ndim" in e for e in errors), errors
+
+
+# ── 7. one writer per store: source_l0_store holds a URI reference ────────
+
+
+@pytest.mark.parametrize("name", sorted(generate.SOURCE_L0_STORE_FIXTURES))
+def test_source_l0_store_is_a_uri_reference(stores, name):
+    _, ok = generate.SOURCE_L0_STORE_FIXTURES[name]
+    errors = zss.validate(stores / name)
+    if ok:
+        assert errors == [], errors
+    else:
+        assert any("source_l0_store" in e and "URI reference" in e for e in errors), (
+            errors
+        )

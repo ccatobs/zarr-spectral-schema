@@ -87,3 +87,31 @@ fn valid_dump_count_dtype_and_dims_are_checked() {
         );
     }
 }
+
+// ── 7. one writer per store: source_l0_store holds a URI reference ────────
+
+#[test]
+fn source_l0_store_is_a_uri_reference() {
+    // The same stores and verdicts as generate.SOURCE_L0_STORE_FIXTURES.
+    for (name, ok) in [
+        ("l1_l0_store_relative.zarr", true),
+        ("l1_l0_store_s3.zarr", true),
+        ("l1_l0_store_abs_path.zarr", false),
+        ("l1_l0_store_empty.zarr", false),
+        ("l1_l0_store_space.zarr", false),
+        ("l1_l0_store_backslash.zarr", false),
+        ("l1_l0_store_bad_escape.zarr", false),
+        ("l1_l0_store_non_ascii.zarr", false),
+    ] {
+        let e = errors(name);
+        if ok {
+            assert!(e.is_empty(), "{name}: expected green, got: {e:?}");
+        } else {
+            assert!(
+                e.iter()
+                    .any(|m| m.contains("source_l0_store") && m.contains("URI reference")),
+                "{name}: expected a URI reference error, got: {e:?}"
+            );
+        }
+    }
+}

@@ -80,6 +80,9 @@ struct AttrSpec {
     /// Value constraint: the attr must hold exactly this value.
     #[serde(default)]
     equals: Option<Value>,
+    /// String format constraint (`uri-reference`).
+    #[serde(default)]
+    format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -407,7 +410,7 @@ fn check_array(
 /// Check declared attrs at one placement location (`where_` is the store path
 /// used in messages). Required attrs must be present and (if present)
 /// type-checked; optional attrs are type-checked only when present. An `equals`
-/// value constraint is checked after the type.
+/// value constraint and a `format` are checked after the type.
 fn check_attrs(
     attrs: &Map<String, Value>,
     declared: &BTreeMap<String, AttrSpec>,
@@ -433,6 +436,13 @@ fn check_attrs(
         } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must equal {equals}, got {value}"
+            ));
+        } else if aspec.format.as_deref() == Some("uri-reference")
+            && !value.as_str().is_some_and(is_uri_reference)
+        {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be a URI reference \
+                 (RFC 3986) and not an absolute path, got {value}"
             ));
         }
     }
@@ -551,6 +561,30 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
         return None;
     }
     Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// An RFC 3986 URI reference (ASCII; a `%` starts a two-hex-digit escape), not
+/// empty and not an absolute path: a leading `/` names a file on one host only.
+/// Parity with the Python `_URI_REFERENCE_RE`.
+fn is_uri_reference(value: &str) -> bool {
+    let allowed = |c: u8| c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c);
+    let mut rest = value.as_bytes();
+    if rest.is_empty() || rest[0] == b'/' {
+        return false;
+    }
+    while let Some((&c, tail)) = rest.split_first() {
+        if c == b'%' {
+            if !(tail.len() >= 2 && tail[0].is_ascii_hexdigit() && tail[1].is_ascii_hexdigit()) {
+                return false;
+            }
+            rest = &tail[2..];
+        } else if allowed(c) {
+            rest = tail;
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).

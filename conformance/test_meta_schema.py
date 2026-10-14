@@ -60,6 +60,12 @@ def test_real_spec_passes_meta_schema():
             id="array-attr-unknown-type",
         ),
         pytest.param(
+            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+                "format", "uri"
+            ),
+            id="unknown-attr-format",
+        ),
+        pytest.param(
             lambda s: s["versions"]["l0_schema_version"].__setitem__(
                 "on_disk", "float"
             ),

@@ -457,6 +457,20 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
 
 
+# source_l0_store values (#20) → (on-disk value, conformant?). Both bindings check
+# the same verdicts (test_storage_contract.py, storage_contract.rs).
+SOURCE_L0_STORE_FIXTURES: dict[str, tuple[str, bool]] = {
+    "l1_l0_store_relative.zarr": ("../../zarr/SOFIA_UPGREAT_ORION_KL.zarr", True),
+    "l1_l0_store_s3.zarr": ("s3://ccat-archive/zarr/scan%20set.zarr", True),
+    "l1_l0_store_abs_path.zarr": ("/data/zarr/SOFIA_UPGREAT_ORION_KL.zarr", False),
+    "l1_l0_store_empty.zarr": ("", False),
+    "l1_l0_store_space.zarr": ("../zarr/my store.zarr", False),
+    "l1_l0_store_backslash.zarr": ("..\\zarr\\x.zarr", False),
+    "l1_l0_store_bad_escape.zarr": ("../zarr/x%zz.zarr", False),
+    "l1_l0_store_non_ascii.zarr": ("../zarr/m\u00fcnchen.zarr", False),
+}
+
+
 def emit_storage_fixtures(out: Path) -> None:
     """Fixtures for #20 (object storage and production volume).
 
@@ -496,6 +510,9 @@ def emit_storage_fixtures(out: Path) -> None:
         out / "l1_bad_valid_dumps.zarr",
         array_overrides={f"{_SCAN}/n_valid_dumps": bad},
     )
+    # source_l0_store holds an RFC 3986 URI reference, never an absolute path.
+    for name, (value, _ok) in SOURCE_L0_STORE_FIXTURES.items():
+        emit_l1_single(out / name, scan_attr_overrides={"source_l0_store": value})
 
 
 def main() -> None:

@@ -149,6 +149,10 @@
         "equals": {
           "description": "Value constraint: when present on disk, the attribute must hold exactly this value.",
           "type": ["string", "integer", "number", "boolean"]
+        },
+        "format": {
+          "description": "String format constraint. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty and never an absolute path.",
+          "enum": ["uri-reference"]
         }
       }
     },

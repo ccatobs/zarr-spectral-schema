@@ -34,7 +34,10 @@
 # `const: false`. `lists:`/`markers:` yield `&[&str]`/`&str` consts directly.
 # The new group fields (placement/inline) and the `*_attrs` sections generate NO
 # consts — they are validator data only. An attr may carry `equals: <value>`
-# (value constraint): when present, the attr must hold exactly that value.
+# (value constraint): when present, the attr must hold exactly that value; and
+# `format: uri-reference` (RFC 3986 URI reference, not empty, not an absolute
+# path). An array entry may carry `attrs` (the array's own attrs, same rules)
+# and a dtype set (`dtype: [float64, float32]`: any name of the set).
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
 spec_version: "0.1.0"
@@ -237,7 +240,14 @@ levels:
       qa:                   { type: object,  required: true }
       mjd:                  { type: number,  required: false }
       cal_hash:             { type: string,  required: false }
-      source_l0_store:      { type: string,  required: false }
+      # The L0 store this L1 store was calibrated from (#20): an RFC 3986 URI
+      # reference — an absolute URI (s3://bucket/x.zarr) or a relative reference
+      # resolved against the URI of this L1 store, its root taken as a directory
+      # (../../zarr/x.zarr). A relative reference survives copying the L0 and L1
+      # stores together (site-to-data-center replication); file:/// would tie
+      # the link to one host. An empty value, a character outside RFC 3986 and
+      # an absolute POSIX path (/data/x.zarr) are errors.
+      source_l0_store:      { type: string,  required: false, format: uri-reference }
       source_l0_scans:      { type: object,  required: false }
       cal_config:           { type: object,  required: false }
       processing_timestamp: { type: string,  required: false }
