@@ -158,8 +158,16 @@
       "additionalProperties": false,
       "properties": {
         "dtype": {
-          "description": "Zarr v3 data type name (core types + variable-length `string`).",
-          "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "bool", "string"]
+          "description": "Zarr v3 data type name (core types + variable-length `string`), or a set of names the array may take (e.g. [float64, float32]). Producers write the first name of a set by default.",
+          "oneOf": [
+            { "$ref": "#/$defs/dtype_name" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/dtype_name" }
+            }
+          ]
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
         "required": { "type": "boolean" },
@@ -173,6 +181,9 @@
           "$ref": "#/$defs/ident"
         }
       }
+    },
+    "dtype_name": {
+      "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "bool", "string"]
     },
     "precedence_alias": {
       "description": "One canonical attribute's source-keyword precedence chain.",

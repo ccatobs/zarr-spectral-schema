@@ -1,0 +1,43 @@
+"""Object storage and production volume (Python binding) — #20.
+
+Each test validates a spec-emitted store (``generate.emit_storage_fixtures``)
+through the public entry point and checks the verdict. The Rust binding runs the
+same checks over the same stores (bindings/rust/tests/storage_contract.rs).
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
+sys.path.insert(0, str(_ROOT / "conformance"))
+
+import generate
+import zarr_spectral_schema as zss
+
+
+@pytest.fixture(scope="module")
+def stores(tmp_path_factory) -> Path:
+    out = tmp_path_factory.mktemp("storage")
+    generate.emit_storage_fixtures(out)
+    return out
+
+
+# ── 3. dtype choice ────────────────────────────────────────────────────────
+
+
+def test_l1_float32_spectra_and_t_sys_are_green(stores):
+    assert zss.validate(stores / "l1_float32.zarr") == []
+
+
+def test_l1_float64_spectra_and_t_sys_are_green(stores):
+    assert zss.validate(stores / "l1_float64.zarr") == []
+
+
+def test_l1_int16_spectra_is_rejected(stores):
+    errors = zss.validate(stores / "l1_int16_spectra.zarr")
+    assert any("scan_000001/spectra" in e and "'int16'" in e for e in errors), errors

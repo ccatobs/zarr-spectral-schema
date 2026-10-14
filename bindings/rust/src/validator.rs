@@ -93,12 +93,38 @@ struct Group {
 
 #[derive(Deserialize)]
 struct ArraySpec {
-    dtype: String,
+    dtype: Dtype,
     ndim: usize,
     required: bool,
     /// Array family: matches every array whose name starts with this prefix.
     #[serde(default)]
     prefix: Option<String>,
+}
+
+/// One dtype name, or a set of names the array may take (#20).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Dtype {
+    One(String),
+    Set(Vec<String>),
+}
+
+impl Dtype {
+    fn allows(&self, dtype: &str) -> bool {
+        match self {
+            Dtype::One(d) => d == dtype,
+            Dtype::Set(set) => set.iter().any(|d| d == dtype),
+        }
+    }
+}
+
+impl std::fmt::Display for Dtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dtype::One(d) => write!(f, "{d:?}"),
+            Dtype::Set(set) => write!(f, "{set:?}"),
+        }
+    }
 }
 
 /// Outcome of validating a store: hard `errors` and advisory `warnings`.
@@ -360,9 +386,9 @@ fn check_array(
         }
         return;
     };
-    if *dtype != aspec.dtype {
+    if !aspec.dtype.allows(dtype) {
         result.errors.push(format!(
-            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
+            "[{level_name}] array '{rel}' dtype {dtype:?} != expected {}",
             aspec.dtype
         ));
     }

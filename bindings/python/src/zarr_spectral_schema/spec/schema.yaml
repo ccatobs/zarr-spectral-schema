@@ -276,8 +276,10 @@ levels:
         inline: true
         arrays:
           # Always written (calibrated.rs:358-476).
-          spectra:      { dtype: float64, ndim: 5, required: true }   # calibrated T; C,D,R,A,S
-          t_sys:        { dtype: float64, ndim: 4, required: true }   # C,R,A,S
+          # spectra and t_sys take float64 (calibrate today) or float32
+          # (kalibrate#93): a dtype set (#20).
+          spectra:      { dtype: [float64, float32], ndim: 5, required: true }   # calibrated T; C,D,R,A,S
+          t_sys:        { dtype: [float64, float32], ndim: 4, required: true }   # C,R,A,S
           t_int:        { dtype: float64, ndim: 1, required: true }   # [S]
           t_off:        { dtype: float64, ndim: 1, required: true }   # [S] OFF integ time
           t_rec_ssb:    { dtype: float64, ndim: 3, required: true }   # C,R,A

@@ -249,7 +249,8 @@ def _check_array(
         if aspec.get("required", False):
             result.errors.append(f"[{level_name}] required array '{rel}' is missing")
         return
-    if arr.dtype != aspec["dtype"]:
+    allowed = aspec["dtype"] if isinstance(aspec["dtype"], list) else [aspec["dtype"]]
+    if arr.dtype not in allowed:
         result.errors.append(
             f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )

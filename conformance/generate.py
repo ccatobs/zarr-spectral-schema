@@ -126,7 +126,11 @@ def _write_arrays(
             continue
         aspec = {**aspec, **array_overrides.get(rel, {})}
         shape = tuple([1] * aspec["ndim"])
-        parent.create_array(name=name, shape=shape, dtype=aspec["dtype"])
+        # A dtype set (#20): write its first name, as the producers do by default.
+        dtype = (
+            aspec["dtype"][0] if isinstance(aspec["dtype"], list) else aspec["dtype"]
+        )
+        parent.create_array(name=name, shape=shape, dtype=dtype)
 
 
 def _write_version_attrs(
@@ -446,6 +450,28 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
 
 
+def emit_storage_fixtures(out: Path) -> None:
+    """Fixtures for #20 (object storage and production volume).
+
+    Both bindings validate these same stores: the Python tests call this
+    function, the Rust tests run ``main()``.
+    """
+    # L1 spectra and t_sys accept float32 as well as float64.
+    for dtype in ("float32", "float64"):
+        emit_l1_single(
+            out / f"l1_{dtype}.zarr",
+            array_overrides={
+                f"{_SCAN}/spectra": {"dtype": dtype},
+                f"{_SCAN}/t_sys": {"dtype": dtype},
+            },
+        )
+    # An integer dtype is outside the set.
+    emit_l1_single(
+        out / "l1_int16_spectra.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"dtype": "int16"}},
+    )
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("usage: python conformance/generate.py <out_dir>", file=sys.stderr)
@@ -486,6 +512,7 @@ def main() -> None:
     print(f"emitted: {out / 'l0_bad_pixels_per_array.zarr'}")
 
     emit_real_output_fixtures(out)
+    emit_storage_fixtures(out)
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.
