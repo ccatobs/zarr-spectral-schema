@@ -28,8 +28,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +41,9 @@ def stores(tmp_path_factory) -> Path:
     # Negatives.
     generate.emit_l1_single(out / "miss_array.zarr", omit={"scan_000001/spectra"})
     generate.emit_l1_single(out / "miss_sob_attr.zarr", omit_attrs={"l1_complete"})
-    generate.emit_l1_multi(out / "miss_band_index.zarr", omit_band_attrs={1: {"band_index"}})
+    generate.emit_l1_multi(
+        out / "miss_band_index.zarr", omit_band_attrs={1: {"band_index"}}
+    )
     return out
 
 

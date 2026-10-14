@@ -16,8 +16,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -84,7 +84,10 @@ def test_l1_complete_false_is_rejected(stores):
 
 @pytest.mark.parametrize(
     "name, phrase",
-    [("l0_bad_l0_complete.zarr", "must be of type 'boolean'"), ("l0_incomplete.zarr", "must equal true")],
+    [
+        ("l0_bad_l0_complete.zarr", "must be of type 'boolean'"),
+        ("l0_incomplete.zarr", "must equal true"),
+    ],
 )
 def test_l0_complete_marker_is_checked(stores, name, phrase):
     errors = zss.validate(stores / name)
@@ -111,12 +114,17 @@ def test_skydiff_family_member_dtype_and_ndim_are_checked(stores):
 
 def test_non_finite_attr_is_its_own_error(stores):
     errors = zss.validate(stores / "l1_nan_attr.zarr")
-    assert "[L1] 'scan_000001/zarr.json': non-finite number in metadata" in errors, errors
+    assert "[L1] 'scan_000001/zarr.json': non-finite number in metadata" in errors, (
+        errors
+    )
 
 
 def test_malformed_zarr_json_is_an_error_not_an_exception(stores):
     errors = zss.validate(stores / "l1_malformed_meta.zarr")
-    assert "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)" in errors
+    assert (
+        "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)"
+        in errors
+    )
 
 
 def test_object_form_of_data_type_is_accepted(stores):
@@ -130,7 +138,9 @@ def test_group_at_array_path_is_rejected(stores):
 
 def test_unicode_digits_in_version_are_rejected(stores):
     errors = zss.validate(stores / "ver_unicode_digits.zarr")
-    assert any("cal_schema_version" in e and "cannot parse version" in e for e in errors), errors
+    assert any(
+        "cal_schema_version" in e and "cannot parse version" in e for e in errors
+    ), errors
 
 
 def test_unicode_digits_in_scan_name_are_rejected(stores):

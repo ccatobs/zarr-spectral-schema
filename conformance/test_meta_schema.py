@@ -16,7 +16,7 @@ from jsonschema import Draft202012Validator
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 
-from zarr_spectral_schema._spec import load_meta_schema, load_spec  # noqa: E402
+from zarr_spectral_schema._spec import load_meta_schema, load_spec
 
 
 def test_meta_schema_is_itself_valid_json_schema():
@@ -35,16 +35,20 @@ def test_real_spec_passes_meta_schema():
     [
         pytest.param(lambda s: s.pop("versions"), id="missing-versions"),
         pytest.param(
-            lambda s: s["levels"]["L0"]["groups"]["source"]["arrays"]["data_5d"].__setitem__(
-                "dtype", "complex128"
-            ),
+            lambda s: s["levels"]["L0"]["groups"]["source"]["arrays"][
+                "data_5d"
+            ].__setitem__("dtype", "complex128"),
             id="unknown-dtype",
         ),
         pytest.param(
-            lambda s: s["versions"]["l0_schema_version"].__setitem__("on_disk", "float"),
+            lambda s: s["versions"]["l0_schema_version"].__setitem__(
+                "on_disk", "float"
+            ),
             id="bad-on_disk",
         ),
-        pytest.param(lambda s: s.__setitem__("spec_version", "1.x"), id="bad-spec_version"),
+        pytest.param(
+            lambda s: s.__setitem__("spec_version", "1.x"), id="bad-spec_version"
+        ),
         # The top level stays strict (additionalProperties: false): an unknown key
         # is still rejected even after precedence_aliases was admitted.
         pytest.param(
@@ -56,7 +60,9 @@ def test_real_spec_passes_meta_schema():
             id="precedence-alias-missing-from",
         ),
         pytest.param(
-            lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("from", "PIXOFFX"),
+            lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__(
+                "from", "PIXOFFX"
+            ),
             id="precedence-alias-from-not-array",
         ),
         pytest.param(
@@ -77,13 +83,17 @@ def test_real_spec_passes_meta_schema():
             lambda s: s["levels"]["L0"]["groups"]["source"].pop("inline"),
             id="group-missing-inline",
         ),
-        pytest.param(lambda s: s["levels"]["L1"].pop("detect"), id="level-missing-detect"),
+        pytest.param(
+            lambda s: s["levels"]["L1"].pop("detect"), id="level-missing-detect"
+        ),
         pytest.param(
             lambda s: s["versions"]["cal_schema_version"].__setitem__("value", "abc"),
             id="version-value-abc",
         ),
         pytest.param(
-            lambda s: s["versions"]["cal_schema_version"].__setitem__("min_supported", "1.x"),
+            lambda s: s["versions"]["cal_schema_version"].__setitem__(
+                "min_supported", "1.x"
+            ),
             id="version-min_supported-not-numeric",
         ),
     ],
@@ -94,7 +104,9 @@ def test_malformed_spec_is_rejected(mutate):
     spec = copy.deepcopy(load_spec())
     mutate(spec)
     validator = Draft202012Validator(load_meta_schema())
-    assert list(validator.iter_errors(spec)), "meta-schema should have rejected this mutation"
+    assert list(validator.iter_errors(spec)), (
+        "meta-schema should have rejected this mutation"
+    )
 
 
 def test_each_detect_attr_names_a_version_of_its_level():
@@ -103,7 +115,9 @@ def test_each_detect_attr_names_a_version_of_its_level():
     spec = load_spec()
     for level_name, level in spec["levels"].items():
         version = spec["versions"].get(level["detect"])
-        assert version is not None, f"{level_name}: detect {level['detect']!r} names no version"
+        assert version is not None, (
+            f"{level_name}: detect {level['detect']!r} names no version"
+        )
         assert version["level"] == level_name
 
 
@@ -111,4 +125,6 @@ def test_each_one_of_member_names_a_group_of_its_level():
     spec = load_spec()
     for level_name, level in spec["levels"].items():
         for name in level.get("one_of", []):
-            assert name in level["groups"], f"{level_name}: one_of names unknown group {name!r}"
+            assert name in level["groups"], (
+                f"{level_name}: one_of names unknown group {name!r}"
+            )

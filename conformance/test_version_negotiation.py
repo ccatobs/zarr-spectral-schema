@@ -28,8 +28,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +71,9 @@ def test_newer_minor_warns_but_passes(stores):
 def test_newer_major_errors(stores):
     result = zss.check(stores / "ver_newer_major.zarr")
     assert not result.ok
-    assert any("cal_schema_version" in e and "2.0" in e for e in result.errors), result.errors
+    assert any("cal_schema_version" in e and "2.0" in e for e in result.errors), (
+        result.errors
+    )
     assert zss.validate(stores / "ver_newer_major.zarr") != []
 
 
@@ -115,12 +117,22 @@ def test_package_version_independent_of_on_disk(stores):
 
 def test_cli_validate_exit_codes(stores):
     env_root = str(_ROOT / "bindings" / "python" / "src")
+
     def run(name: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "zarr_spectral_schema", "validate", str(stores / name)],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                "-m",
+                "zarr_spectral_schema",
+                "validate",
+                str(stores / name),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
             env={**__import__("os").environ, "PYTHONPATH": env_root},
         )
+
     ok = run("equal.zarr")
     assert ok.returncode == 0, ok.stderr
     bad = run("ver_newer_major.zarr")

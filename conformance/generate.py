@@ -181,7 +181,9 @@ def emit_l0(
     level = _level_for(spec, "l0_schema_version")
     one_of = level.get("one_of", [])
     if scans is None:
-        scans = {f"scan_{i:06d}": [g] for i, g in enumerate(one_of, start=1)} or {_SCAN: []}
+        scans = {f"scan_{i:06d}": [g] for i, g in enumerate(one_of, start=1)} or {
+            _SCAN: []
+        }
 
     root = zarr.open_group(store=str(out_dir), mode="w", zarr_format=3)
     _write_version_attrs(root, spec, "L0", versions or {})
@@ -302,7 +304,9 @@ def emit_l1_multi(
                 _write_arrays(band, gspec, band_rel, omit, emit_optional=True)
             else:
                 sub = band.require_group(gname)
-                _write_arrays(sub, gspec, f"{band_rel}/{gname}", omit, emit_optional=True)
+                _write_arrays(
+                    sub, gspec, f"{band_rel}/{gname}", omit, emit_optional=True
+                )
     return out_dir
 
 
@@ -334,17 +338,25 @@ def emit(
 # min_supported is the oldest version whose stores pass the structural check,
 # which today equals `value`, so an older minor is below the floor.
 VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
-    "ver_newer_minor.zarr": {"cal_schema_version": "1.9"},  # newer minor → warn once, pass
+    "ver_newer_minor.zarr": {
+        "cal_schema_version": "1.9"
+    },  # newer minor → warn once, pass
     "ver_newer_major.zarr": {"cal_schema_version": "2.0"},  # newer major → error
-    "ver_below_floor.zarr": {"cal_schema_version": "1.2"},  # below min_supported → one error
+    "ver_below_floor.zarr": {
+        "cal_schema_version": "1.2"
+    },  # below min_supported → one error
 }
 
 # The integer-axis (L0) negotiation fixture is a structurally-valid L0 store with
 # its `l0_schema_version` overridden; it lives in its own dict because it is
 # emitted by `emit_l0`, not the L1 `emit` shim above.
 L0_VERSION_FIXTURES: dict[str, dict[str, str | int]] = {
-    "ver_l0_newer_major.zarr": {"l0_schema_version": 3},    # integer axis, newer major → error
-    "ver_l0_below_floor.zarr": {"l0_schema_version": 1},    # below min_supported → one error
+    "ver_l0_newer_major.zarr": {
+        "l0_schema_version": 3
+    },  # integer axis, newer major → error
+    "ver_l0_below_floor.zarr": {
+        "l0_schema_version": 1
+    },  # below min_supported → one error
 }
 
 
@@ -366,7 +378,10 @@ def emit_real_output_fixtures(out: Path) -> None:
         omit={f"scan_1003537/{one_of[0]}/data_5d"},
     )
     # A root child named scan_* that does not match the scan pattern is an error.
-    emit_l0(out / "l0_bad_scan_name.zarr", scans={_SCAN: [one_of[0]], "scan_12": [one_of[0]]})
+    emit_l0(
+        out / "l0_bad_scan_name.zarr",
+        scans={_SCAN: [one_of[0]], "scan_12": [one_of[0]]},
+    )
     # The optional L0 completeness marker is type-checked (boolean) and holds true.
     emit_l0(out / "l0_bad_l0_complete.zarr", scan_attr_overrides={"l0_complete": "yes"})
     emit_l0(out / "l0_incomplete.zarr", scan_attr_overrides={"l0_complete": False})
@@ -379,34 +394,46 @@ def emit_real_output_fixtures(out: Path) -> None:
         },
     )
     # The completeness marker holds `true` (a DSL value constraint).
-    emit_l1_single(out / "l1_incomplete.zarr", scan_attr_overrides={"l1_complete": False})
+    emit_l1_single(
+        out / "l1_incomplete.zarr", scan_attr_overrides={"l1_complete": False}
+    )
     # The skydiff group declares the spectrum_ family: spectrum_0 is checked.
     emit_l1_single(
         out / "l1_bad_skydiff.zarr",
-        array_overrides={f"{_SCAN}/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}},
+        array_overrides={
+            f"{_SCAN}/skydiff/spectrum_0": {"dtype": "float32", "ndim": 2}
+        },
     )
     # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
     emit_l1_single(out / "l1_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
 
     # One parse path in both bindings: one fixture per former Rust/Python divergence.
     # A non-finite attr value (zarr-python writes a bare NaN token).
-    emit_l1_single(out / "l1_nan_attr.zarr", scan_attr_overrides={"rest_freq_hz": float("nan")})
+    emit_l1_single(
+        out / "l1_nan_attr.zarr", scan_attr_overrides={"rest_freq_hz": float("nan")}
+    )
     # A zarr.json that does not parse.
     emit_l1_single(out / "l1_malformed_meta.zarr")
-    (out / "l1_malformed_meta.zarr" / _SCAN / "t_int" / "zarr.json").write_text("{not json")
+    (out / "l1_malformed_meta.zarr" / _SCAN / "t_int" / "zarr.json").write_text(
+        "{not json"
+    )
     # The object form of data_type (zarr v3 extension form).
     emit_l1_single(out / "l1_object_dtype.zarr")
     _patch_meta(
         out / "l1_object_dtype.zarr",
         f"{_SCAN}/t_int",
-        lambda m: m.__setitem__("data_type", {"name": m["data_type"], "configuration": {}}),
+        lambda m: m.__setitem__(
+            "data_type", {"name": m["data_type"], "configuration": {}}
+        ),
     )
     # A group where the spec names an (optional) array.
     store = emit_l1_single(out / "l1_group_at_array.zarr")
     shutil.rmtree(store / _SCAN / "lloadsn")
     zarr.open_group(store=str(store), mode="r+")[_SCAN].require_group("lloadsn")
     # Unicode digits in a version and in a scan name (ASCII-only grammar).
-    emit_l1_single(out / "ver_unicode_digits.zarr", versions={"cal_schema_version": "١.٣"})
+    emit_l1_single(
+        out / "ver_unicode_digits.zarr", versions={"cal_schema_version": "١.٣"}
+    )
     emit_l0(
         out / "l0_unicode_scan_name.zarr",
         scans={_SCAN: [one_of[0]], "scan_٠٠٠٠٠٢": [one_of[0]]},
@@ -424,15 +451,15 @@ def main() -> None:
     emit_l0(out / "l0.zarr")
     emit_l1_single(out / "l1_single.zarr")
     emit_l1_multi(out / "l1_multi.zarr")
-    print(f"emitted: {out/'l0.zarr'}")
-    print(f"emitted: {out/'l1_single.zarr'}")
-    print(f"emitted: {out/'l1_multi.zarr'}")
+    print(f"emitted: {out / 'l0.zarr'}")
+    print(f"emitted: {out / 'l1_single.zarr'}")
+    print(f"emitted: {out / 'l1_multi.zarr'}")
 
     # Structural negatives both bindings reject (naming the path/attr).
     emit_l1_single(out / "miss_array.zarr", omit={"scan_000001/spectra"})
     emit_l1_multi(out / "miss_band_index.zarr", omit_band_attrs={1: {"band_index"}})
-    print(f"emitted: {out/'miss_array.zarr'}")
-    print(f"emitted: {out/'miss_band_index.zarr'}")
+    print(f"emitted: {out / 'miss_array.zarr'}")
+    print(f"emitted: {out / 'miss_band_index.zarr'}")
 
     # Identity + provenance contract. The post-store (l0.zarr above) carries the
     # new optional L0 identity attrs; a pre-store omits them and must still
@@ -448,9 +475,9 @@ def main() -> None:
         out / "l0_bad_pixels_per_array.zarr",
         scan_attr_overrides={"pixels_per_array": {"HFA": ["P1", "P2"]}},
     )
-    print(f"emitted: {out/'l0_pre6.zarr'}")
-    print(f"emitted: {out/'l0_bad_raw_attrs.zarr'}")
-    print(f"emitted: {out/'l0_bad_pixels_per_array.zarr'}")
+    print(f"emitted: {out / 'l0_pre6.zarr'}")
+    print(f"emitted: {out / 'l0_bad_raw_attrs.zarr'}")
+    print(f"emitted: {out / 'l0_bad_pixels_per_array.zarr'}")
 
     emit_real_output_fixtures(out)
 
@@ -458,10 +485,10 @@ def main() -> None:
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.
     for name, versions in VERSION_FIXTURES.items():
         emit(out / name, versions=versions)
-        print(f"emitted: {out/name}")
+        print(f"emitted: {out / name}")
     for name, versions in L0_VERSION_FIXTURES.items():
         emit_l0(out / name, versions=versions)
-        print(f"emitted: {out/name}")
+        print(f"emitted: {out / name}")
 
 
 if __name__ == "__main__":

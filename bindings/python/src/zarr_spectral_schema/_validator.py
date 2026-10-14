@@ -106,9 +106,7 @@ def check_view(view: StoreView, spec: dict) -> ValidationResult:
         if level.get("detect") and level["detect"] in view.root_attrs
     }
     if not applicable:
-        detects = sorted(
-            level["detect"] for level in levels.values() if level.get("detect")
-        )
+        detects = sorted(level["detect"] for level in levels.values() if level.get("detect"))
         result.errors.append(
             "store declares no known level: none of the detect attributes "
             f"{detects} are present in root attributes"
@@ -127,17 +125,13 @@ def check_view(view: StoreView, spec: dict) -> ValidationResult:
     return result
 
 
-def _check_level(
-    view: StoreView, level_name: str, level: dict, result: ValidationResult
-) -> None:
+def _check_level(view: StoreView, level_name: str, level: dict, result: ValidationResult) -> None:
     """Walk one applicable level's structural contract against the store view."""
     # Metadata that did not parse is a structure finding of this level.
     result.errors.extend(f"[{level_name}] {e}" for e in view.errors)
 
     # Root attrs declared for this level.
-    _check_attrs(
-        view.root_attrs, level.get("root_attrs", {}), "root", level_name, result
-    )
+    _check_attrs(view.root_attrs, level.get("root_attrs", {}), "root", level_name, result)
 
     groups = level.get("groups", {})
 
@@ -158,9 +152,7 @@ def _check_level(
             )
     scan_groups = sorted(p for p in view.group_attrs if _SCAN_RE.fullmatch(p))
     if needs_scans and not scan_groups:
-        result.errors.append(
-            f"[{level_name}] no scan_<NNNNNN> groups found at the store root"
-        )
+        result.errors.append(f"[{level_name}] no scan_<NNNNNN> groups found at the store root")
         return
 
     for sg in scan_groups:
@@ -181,9 +173,7 @@ def _check_level(
 
         # Multi-frontend: per-band attrs on each band group.
         for b in bands:
-            _check_attrs(
-                view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result
-            )
+            _check_attrs(view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result)
 
         # `scan` placement resolves to the scan group; `scan_or_band` to the
         # scan group (single-frontend) or each band (multi-frontend).
@@ -203,8 +193,7 @@ def _check_level(
                 present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
                 if one_of and len(present) != 1:
                     result.errors.append(
-                        f"[{level_name}] '{t}' must hold exactly one of {one_of}, "
-                        f"found {present}"
+                        f"[{level_name}] '{t}' must hold exactly one of {one_of}, found {present}"
                     )
                 for gname, group in placed.items():
                     if gname in one_of and gname not in present:
@@ -259,8 +248,7 @@ def _check_array(
         return
     if arr.dtype != aspec["dtype"]:
         result.errors.append(
-            f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected "
-            f"{aspec['dtype']!r}"
+            f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )
     if arr.ndim != aspec["ndim"]:
         result.errors.append(
@@ -287,8 +275,7 @@ def _check_attrs(
         if not present:
             if aspec.get("required", False):
                 result.errors.append(
-                    f"[{level_name}] required attribute '{name}' is missing at "
-                    f"'{where}'"
+                    f"[{level_name}] required attribute '{name}' is missing at '{where}'"
                 )
             continue
         expected = aspec["type"]
@@ -353,29 +340,23 @@ def _negotiate(attr_name: str, vspec: dict, value: object) -> tuple[list[str], l
 
     disk = str(value)
     if store < floor:
-        return (
-            [
-                f"root attribute '{attr_name}': store version {disk} is older than the minimum "
-                f"supported ({vspec['min_supported']})"
-            ],
-            [],
+        msg = (
+            f"root attribute '{attr_name}': store version {disk} is older than the minimum "
+            f"supported ({vspec['min_supported']})"
         )
+        return ([msg], [])
     if store[0] > current[0]:
-        return (
-            [
-                f"root attribute '{attr_name}': store version {disk} is a newer major than this "
-                f"build supports ({vspec['value']}); refusing to validate"
-            ],
-            [],
+        msg = (
+            f"root attribute '{attr_name}': store version {disk} is a newer major than this "
+            f"build supports ({vspec['value']}); refusing to validate"
         )
+        return ([msg], [])
     if store[0] == current[0] and store[1] > current[1]:
-        return (
-            [],
-            [
-                f"root attribute '{attr_name}': store version {disk} is a newer minor than this "
-                f"build knows ({vspec['value']}); additive new fields are ignored"
-            ],
+        msg = (
+            f"root attribute '{attr_name}': store version {disk} is a newer minor than this "
+            f"build knows ({vspec['value']}); additive new fields are ignored"
         )
+        return ([], [msg])
     return ([], [])
 
 

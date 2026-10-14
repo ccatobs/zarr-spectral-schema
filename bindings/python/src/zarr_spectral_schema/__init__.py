@@ -14,7 +14,7 @@ from __future__ import annotations
 from ._spec import load_spec
 from ._validator import ValidationResult, check, validate, validate_view
 
-__all__ = ["validate", "check", "ValidationResult", "validate_view", "load_spec", "constants"]
+__all__ = ["ValidationResult", "check", "constants", "load_spec", "validate", "validate_view"]
 
 
 def _build_constants() -> dict[str, str | tuple[str, ...]]:

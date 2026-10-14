@@ -16,7 +16,7 @@ import pytest
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 
-import zarr_spectral_schema as zss  # noqa: E402
+import zarr_spectral_schema as zss
 
 REAL = _ROOT / "conformance" / "real_stores"
 
