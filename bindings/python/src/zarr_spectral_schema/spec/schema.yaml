@@ -249,6 +249,9 @@ levels:
       rest_freq_hz: { type: number,  required: true }
       l1_complete:  { type: boolean, required: true }
       frontend:     { type: string,  required: false }
+      # Verbatim source-keyword provenance forwarded from L0 (calibrated.rs writes
+      # it per band in multi-frontend stores). Top-level object type-checked only.
+      raw_attrs:    { type: object,  required: false }
     groups:
       # The L1 main arrays sit directly under the scan group (single-frontend) or
       # each band sub-group (multi-frontend) — placement scan_or_band, inline:true

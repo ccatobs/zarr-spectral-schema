@@ -60,3 +60,12 @@ fn provenance_attrs_as_objects_are_green() {
     let e = errors("l1_provenance_objects.zarr");
     assert!(e.is_empty(), "expected green, got: {e:?}");
 }
+
+#[test]
+fn l1_raw_attrs_must_be_object() {
+    let e = errors("l1_bad_raw_attrs.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("raw_attrs") && m.contains("must be of type") && m.contains("object")),
+        "expected a raw_attrs type error, got: {e:?}"
+    );
+}

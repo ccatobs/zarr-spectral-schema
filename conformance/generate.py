@@ -344,6 +344,8 @@ def emit_real_output_fixtures(out: Path) -> None:
             "processing_steps": {"skydiff": False, "obs_mode": "TotalPower"},
         },
     )
+    # L1 declares raw_attrs (verbatim source-keyword provenance) as an object.
+    emit_l1_single(out / "l1_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
 
 
 def main() -> None:

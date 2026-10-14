@@ -54,3 +54,11 @@ def test_provenance_attrs_as_objects_are_green(stores):
     assert isinstance(scan["source_l0_scans"], dict)
     assert isinstance(scan["processing_steps"], dict)
     assert zss.validate(stores / "l1_provenance_objects.zarr") == []
+
+
+def test_l1_raw_attrs_must_be_object(stores):
+    errors = zss.validate(stores / "l1_bad_raw_attrs.zarr")
+    assert any(
+        "raw_attrs" in e and "scan_000001" in e and "must be of type 'object'" in e
+        for e in errors
+    ), errors
