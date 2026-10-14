@@ -1,0 +1,87 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "scan_number": 1029951,
+    "source": "ORIONKL",
+    "instmode": "CAL",
+    "line": "NH3(100-001)L",
+    "date_obs": "2018-12-18T06:11:45",
+    "telescope": "SOFIA",
+    "observer": "RobertSlawa",
+    "rest_freq_hz": 572498200000.0,
+    "velocity_source_kms": 0.0,
+    "lloadsn": 1029949,
+    "alti_end": "38327.0",
+    "alti_sta": "38207.0",
+    "aor_id": "83_0630_1",
+    "aot_id": "singlepoint_chopped.sh_-f_inpar_singlepoint_chopped_ORIONKL",
+    "backend": "4G1_PX00_S",
+    "datasrc": "ASTRO",
+    "deploy": "DAOF",
+    "flight_leg": "5",
+    "frontend": "4G1",
+    "gps_alt": "12246.19344",
+    "headstat": "ORIGINAL",
+    "instcfg": "HFAV_PX00 KOSMA_HFA_QCL-LO_0 HFAV_PX04 KOSMA_HFA_QCL-LO_0",
+    "instrume": "GREAT",
+    "lat_end": "29.6455",
+    "lat_sta": "29.669",
+    "lon_end": "-130.621",
+    "lon_sta": "-130.6",
+    "mccsmode": "great_standard",
+    "mission_id": "2018-12-18_GR_F541",
+    "obs_id": "2018-12-18_GR_F541_4G1_PX00_S_029951_002",
+    "operator": "EmilyEric",
+    "pi_name": "Guesten_Rolf",
+    "plan_id": "83_0630",
+    "pressalt": "11783.0388",
+    "procstat": "LEVEL_1",
+    "spectel1": "GRE_4G1",
+    "spectel2": "NONE",
+    "tamb_sofi": "257.0",
+    "tracerr": "false",
+    "tracmode": "OFFSET",
+    "wvz_end": "3.735",
+    "wvz_sta": "3.66",
+    "za_end": "48.2448",
+    "za_start": "48.3066",
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "raw_attrs": {
+      "fits_version": "2.12",
+      "pixel_offset_method": "direct",
+      "substitutions": {
+        "mjd": "computed_from_date_obs",
+        "tsky": "keyword"
+      },
+      "rotating_terms": {
+        "2": {
+          "posangle": 180.0,
+          "anglediff": 0.8788,
+          "cosydel": "J2000"
+        },
+        "3": {
+          "posangle": 180.0,
+          "anglediff": 0.9318,
+          "cosydel": "J2000"
+        }
+      },
+      "static_geometry": {
+        "4G1_PX00_S": {
+          "rxdx": 1.5885305385,
+          "rxdy": -7.3273484586,
+          "refrxdx": 2.0229,
+          "refrxdy": -2.6341,
+          "signrxdx": -1.0,
+          "signrxdy": 1.0,
+          "pixoffx": -0.362451634224983,
+          "pixoffy": 4.69933521422343
+        }
+      }
+    }
+  }
+}

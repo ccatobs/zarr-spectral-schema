@@ -54,6 +54,11 @@
       "type": "string",
       "pattern": "^[A-Z][A-Z0-9_]*$"
     },
+    "version_value": {
+      "description": "An on-disk version: major or major.minor, ASCII digits only (the grammar both bindings parse).",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
     "version": {
       "type": "object",
       "required": ["level", "on_disk", "value", "min_supported"],
@@ -64,8 +69,8 @@
           "description": "How the value is encoded in the store attribute.",
           "enum": ["integer", "string"]
         },
-        "value": { "type": "string" },
-        "min_supported": { "type": "string" },
+        "value": { "$ref": "#/$defs/version_value" },
+        "min_supported": { "$ref": "#/$defs/version_value" },
         "const": {
           "description": "Override the generated Rust const identifier (default UPPER(attr key)).",
           "$ref": "#/$defs/ident"
@@ -74,12 +79,19 @@
     },
     "level": {
       "type": "object",
-      "required": ["groups"],
+      "required": ["detect", "groups"],
       "additionalProperties": false,
       "properties": {
         "detect": {
           "description": "Root attribute whose presence marks a store as this level (e.g. l0_schema_version).",
           "type": "string"
+        },
+        "one_of": {
+          "description": "Groups of which each placement target holds exactly one. Only the present group's arrays are checked; both or neither is an error.",
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" }
         },
         "root_attrs": { "$ref": "#/$defs/attrs" },
         "scan_attrs": { "$ref": "#/$defs/attrs" },
@@ -94,7 +106,7 @@
     },
     "group": {
       "type": "object",
-      "required": ["arrays"],
+      "required": ["placement", "inline", "arrays"],
       "additionalProperties": false,
       "properties": {
         "const": {
@@ -133,7 +145,11 @@
           "description": "JSON value type the attribute is encoded as.",
           "enum": ["string", "integer", "number", "boolean", "array", "object"]
         },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "equals": {
+          "description": "Value constraint: when present on disk, the attribute must hold exactly this value.",
+          "type": ["string", "integer", "number", "boolean"]
+        }
       }
     },
     "array": {
@@ -147,6 +163,11 @@
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
         "required": { "type": "boolean" },
+        "prefix": {
+          "description": "Array family: the entry matches every array in the group whose name starts with this prefix (e.g. spectrum_ for spectrum_0, spectrum_1_3). `required` then means at least one member.",
+          "type": "string",
+          "minLength": 1
+        },
         "const": {
           "description": "Override the generated array const identifier (default UPPER(on-disk name)).",
           "$ref": "#/$defs/ident"

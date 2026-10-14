@@ -1,0 +1,51 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "band_index": 1,
+    "line": "NH3(100-001)L",
+    "rest_freq_hz": 572498200000.0,
+    "arrays": [
+      "4G1"
+    ],
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "frontend": "4G1",
+    "raw_attrs": {
+      "fits_version": "2.12",
+      "pixel_offset_method": "direct",
+      "substitutions": {
+        "mjd": "computed_from_date_obs",
+        "tsky": "keyword"
+      },
+      "rotating_terms": {
+        "1": {
+          "posangle": 180.0,
+          "anglediff": 0.9318,
+          "cosydel": "J2000"
+        },
+        "2": {
+          "posangle": 180.0,
+          "anglediff": 0.9318,
+          "cosydel": "J2000"
+        }
+      },
+      "static_geometry": {
+        "4G1_PX00_S": {
+          "rxdx": 1.5885305385,
+          "rxdy": -7.3273484586,
+          "refrxdx": 2.0229,
+          "refrxdy": -2.6341,
+          "signrxdx": -1.0,
+          "signrxdy": 1.0,
+          "pixoffx": -0.358104524737538,
+          "pixoffy": 4.69966847683485
+        }
+      }
+    },
+    "l1_complete": true
+  }
+}

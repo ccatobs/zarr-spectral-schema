@@ -32,7 +32,10 @@ def main(argv: list[str] | None = None) -> int:
         for e in result.errors:
             print(f"error: {e}", file=sys.stderr)
         if result.ok:
-            print(f"OK: {args.store} is conformant" + (f" ({len(result.warnings)} warning(s))" if result.warnings else ""))
+            print(
+                f"OK: {args.store} is conformant"
+                + (f" ({len(result.warnings)} warning(s))" if result.warnings else "")
+            )
             return 0
         print(f"FAIL: {args.store} has {len(result.errors)} error(s)", file=sys.stderr)
         return 1

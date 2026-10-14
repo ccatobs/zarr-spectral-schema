@@ -18,8 +18,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")

@@ -4,8 +4,9 @@ A store carries producer-owned on-disk versions (``l0_schema_version`` integer,
 ``cal_schema_version`` ``major.minor``). The validator range-negotiates each
 against the spec's supported window (``min_supported`` .. ``value``):
 
-  below min_supported            → error
-  older / equal within the range → pass, no warning
+  below min_supported            → one error (min_supported = oldest
+                                   version that passes the structure)
+  equal                          → pass, no warning
   newer minor than `value`       → warn once, validation still passes
   newer major than `value`       → error
 
@@ -27,8 +28,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -53,12 +54,6 @@ def test_equal_passes_no_warnings(stores):
     assert result.warnings == []
 
 
-def test_older_minor_passes_no_warnings(stores):
-    result = zss.check(stores / "ver_older.zarr")
-    assert result.ok, result.errors
-    assert result.warnings == []
-
-
 def test_newer_minor_warns_but_passes(stores):
     result = zss.check(stores / "ver_newer_minor.zarr")
     # Additive: validation still succeeds (no errors)...
@@ -76,7 +71,9 @@ def test_newer_minor_warns_but_passes(stores):
 def test_newer_major_errors(stores):
     result = zss.check(stores / "ver_newer_major.zarr")
     assert not result.ok
-    assert any("cal_schema_version" in e and "2.0" in e for e in result.errors), result.errors
+    assert any("cal_schema_version" in e and "2.0" in e for e in result.errors), (
+        result.errors
+    )
     assert zss.validate(stores / "ver_newer_major.zarr") != []
 
 
@@ -86,10 +83,19 @@ def test_l0_integer_newer_major_errors(stores):
     assert any("l0_schema_version" in e for e in result.errors), result.errors
 
 
-def test_below_floor_errors(stores):
-    result = zss.check(stores / "ver_below_floor.zarr")
-    assert not result.ok
-    assert any("cal_schema_version" in e for e in result.errors), result.errors
+@pytest.mark.parametrize(
+    "name, attr",
+    [
+        ("ver_below_floor.zarr", "cal_schema_version"),
+        ("ver_l0_below_floor.zarr", "l0_schema_version"),
+    ],
+)
+def test_below_floor_is_one_version_error(stores, name, attr):
+    # min_supported names the oldest version whose stores pass the structural
+    # check; the fixture is structurally current, so the version is the only error.
+    result = zss.check(stores / name)
+    assert len(result.errors) == 1, result.errors
+    assert attr in result.errors[0] and "minimum supported" in result.errors[0]
 
 
 def test_package_version_independent_of_on_disk(stores):
@@ -111,12 +117,22 @@ def test_package_version_independent_of_on_disk(stores):
 
 def test_cli_validate_exit_codes(stores):
     env_root = str(_ROOT / "bindings" / "python" / "src")
+
     def run(name: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "zarr_spectral_schema", "validate", str(stores / name)],
-            capture_output=True, text=True,
+            [
+                sys.executable,
+                "-m",
+                "zarr_spectral_schema",
+                "validate",
+                str(stores / name),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
             env={**__import__("os").environ, "PYTHONPATH": env_root},
         )
+
     ok = run("equal.zarr")
     assert ok.returncode == 0, ok.stderr
     bad = run("ver_newer_major.zarr")
