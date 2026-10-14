@@ -60,14 +60,14 @@ def test_real_spec_passes_meta_schema():
             id="array-attr-unknown-type",
         ),
         pytest.param(
-            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["source_l0_store"].__setitem__(
                 "format", "uri"
             ),
             id="unknown-attr-format",
         ),
         # A format constrains a string: on any other type it is a spec error.
         pytest.param(
-            lambda s: s["levels"]["L1"]["scan_attrs"]["source_l0_store"].__setitem__(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["source_l0_store"].__setitem__(
                 "type", "integer"
             ),
             id="format-on-non-string-attr",
@@ -128,6 +128,36 @@ def test_real_spec_passes_meta_schema():
             ),
             id="version-min_supported-not-numeric",
         ),
+        # #19: every array declares its dims; flag bits fit a uint16; the attr
+        # keys sentinel and enum are well-formed.
+        pytest.param(
+            lambda s: s["levels"]["L0"]["groups"]["source"]["arrays"]["data_5d"].pop(
+                "dims"
+            ),
+            id="array-missing-dims",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"][
+                "spectra"
+            ].__setitem__("units", 1),
+            id="array-units-not-string",
+        ),
+        pytest.param(
+            lambda s: s["flag_bits"].__setitem__("BAD_CHANNEL", 16),
+            id="flag-bit-out-of-range",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["specsys"].__setitem__(
+                "sentinel", "NONE"
+            ),
+            id="sentinel-not-boolean",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["specsys"].__setitem__(
+                "enum", []
+            ),
+            id="enum-empty",
+        ),
     ],
 )
 def test_malformed_spec_is_rejected(mutate):
@@ -160,3 +190,23 @@ def test_each_one_of_member_names_a_group_of_its_level():
             assert name in level["groups"], (
                 f"{level_name}: one_of names unknown group {name!r}"
             )
+
+
+def test_each_array_declares_one_dim_per_axis():
+    spec = load_spec()
+    for level_name, level in spec["levels"].items():
+        for gname, group in level["groups"].items():
+            for aname, aspec in group["arrays"].items():
+                assert len(aspec["dims"]) == aspec["ndim"], (
+                    f"{level_name}/{gname}/{aname}"
+                )
+
+
+def test_no_attr_is_declared_at_two_placements():
+    # A scan-or-band attr resolves to the scan group or to each band, so it may
+    # not also be a scan attr or a band attr.
+    spec = load_spec()
+    for level_name, level in spec["levels"].items():
+        sob = set(level.get("scan_or_band_attrs", {}))
+        for section in ("scan_attrs", "band_attrs"):
+            assert not sob & set(level.get(section, {})), (level_name, section)

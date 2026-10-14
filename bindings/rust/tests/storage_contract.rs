@@ -151,7 +151,7 @@ fn local_path_with_double_colon_is_that_path() {
 #[test]
 fn unlistable_local_group_is_an_error() {
     use std::os::unix::fs::PermissionsExt;
-    // l1_bad_skydiff.zarr has two errors when every node is readable.
+    // l1_bad_skydiff.zarr has three errors when every node is readable.
     let skydiff = fixtures().join("l1_bad_skydiff.zarr/scan_000001/skydiff");
     let mode = |m| std::fs::Permissions::from_mode(m);
     std::fs::set_permissions(&skydiff, mode(0o311)).unwrap(); // no read: cannot list

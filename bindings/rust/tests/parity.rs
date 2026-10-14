@@ -10,8 +10,8 @@ use zarr_spectral_schema as zss;
 
 #[test]
 fn versions_match() {
-    assert_eq!(zss::L0_SCHEMA_VERSION, "2");
-    assert_eq!(zss::L1_SCHEMA_VERSION, "1.3");
+    assert_eq!(zss::L0_SCHEMA_VERSION, "3");
+    assert_eq!(zss::L1_SCHEMA_VERSION, "2.0");
 }
 
 #[test]

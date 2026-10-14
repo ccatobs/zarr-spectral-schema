@@ -39,6 +39,8 @@ import fsspec
 class ArrayView:
     dtype: str
     shape: list[int]
+    # zarr v3 `dimension_names` as parsed (None when absent or null)
+    dimension_names: Any = None
     attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -117,6 +119,7 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
             view.arrays[child] = ArrayView(
                 dtype=_dtype_name(meta.get("data_type")),
                 shape=shape if isinstance(shape, list) else [],
+                dimension_names=meta.get("dimension_names"),
                 attrs=_attributes(meta),
             )
         elif meta.get("node_type") == "group":

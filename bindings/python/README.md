@@ -8,7 +8,7 @@ package data — there is no hand-typed duplicate of the contract.
 import zarr_spectral_schema as zss
 
 zss.DATA_5D  # "data_5d"   — spec-derived constant
-zss.L0_SCHEMA_VERSION  # "2"
+zss.L0_SCHEMA_VERSION  # "3"
 problems = zss.validate("path/to/store.zarr")  # [] == conformant
 problems = zss.validate("s3://bucket/store.zarr")  # needs the `s3` extra
 ```

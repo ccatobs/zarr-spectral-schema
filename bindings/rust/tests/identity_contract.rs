@@ -3,12 +3,12 @@
 //! Validates the SAME spec-emitted stores the Python binding does
 //! (conformance/test_identity_contract.py) — the cross-binding parity leg. The
 //! shared generator (`conformance/generate.py main()`) emits, into the target
-//! dir: the post-#6 `l0.zarr` (carrying the new optional identity attrs), the
-//! pre-#6 `l0_pre6.zarr` (without them), and the wrong-typed negatives
+//! dir: the post-#6 `l0.zarr` (carrying the identity attrs), the pre-#6
+//! `l0_pre6.zarr` (without them), and the wrong-typed negatives
 //! `l0_bad_raw_attrs.zarr` / `l0_bad_pixels_per_array.zarr`.
 //!
-//! Proves the contract is additive: post-#6 green, pre-#6 still green (fields
-//! optional), wrong-typed rejected — including the legacy `pixels_per_array`
+//! Post-#6 green; pre-#6 rejected since L0 3 (#19) made the identity attrs
+//! required; wrong-typed rejected — including the legacy `pixels_per_array`
 //! dict form, which `type: array` deliberately refuses.
 
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ fn emit_fixtures() -> PathBuf {
     out
 }
 
-// ── additive: post-#6 green; pre-#6 (no new fields) still green ──────────────
+// ── post-#6 green; pre-#6 (no identity attrs) rejected since L0 3 ─────────────
 
 #[test]
 fn post6_l0_is_green() {
@@ -51,13 +51,17 @@ fn post6_l0_is_green() {
 }
 
 #[test]
-fn pre6_l0_is_green() {
+fn pre6_l0_without_identity_attrs_is_rejected() {
+    // L0 3 (#19): the identity attrs are required.
     let f = emit_fixtures();
     let problems = zss::validate(&f.join("l0_pre6.zarr"));
-    assert!(
-        problems.is_empty(),
-        "pre-#6 store (optional fields absent) must still be green, got: {problems:?}"
-    );
+    for name in ["frontend", "pixels_per_array", "raw_attrs"] {
+        let want = format!("[L0] required attribute '{name}' is missing at 'scan_000001'");
+        assert!(
+            problems.contains(&want),
+            "expected {want:?}, got: {problems:?}"
+        );
+    }
 }
 
 // ── wrong-typed values are rejected ─────────────────────────────────────────

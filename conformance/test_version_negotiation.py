@@ -39,7 +39,7 @@ def stores(tmp_path_factory) -> Path:
     # version overridden, so the only thing under test is the range check. The
     # cal_schema_version fixtures ride an L1 single-frontend store; the integer
     # (l0_schema_version) fixture rides an L0 store.
-    generate.emit_l1_single(out / "equal.zarr")  # spec-current: cal=1.3
+    generate.emit_l1_single(out / "equal.zarr")  # spec-current: cal=2.0
     for name, versions in generate.VERSION_FIXTURES.items():
         generate.emit(out / name, versions=versions)
     for name, versions in generate.L0_VERSION_FIXTURES.items():
@@ -63,7 +63,7 @@ def test_newer_minor_warns_but_passes(stores):
     assert len(result.warnings) == 1, result.warnings
     w = result.warnings[0]
     assert "cal_schema_version" in w
-    assert "1.9" in w and "1.3" in w
+    assert "2.9" in w and "2.0" in w
     # Back-compat surface: validate() returns errors only → empty here.
     assert zss.validate(stores / "ver_newer_minor.zarr") == []
 
@@ -71,7 +71,7 @@ def test_newer_minor_warns_but_passes(stores):
 def test_newer_major_errors(stores):
     result = zss.check(stores / "ver_newer_major.zarr")
     assert not result.ok
-    assert any("cal_schema_version" in e and "2.0" in e for e in result.errors), (
+    assert any("cal_schema_version" in e and "3.0" in e for e in result.errors), (
         result.errors
     )
     assert zss.validate(stores / "ver_newer_major.zarr") != []
@@ -110,7 +110,7 @@ def test_package_version_independent_of_on_disk(stores):
     assert "l0_schema_version" in l0.root_attrs
     assert "spec_version" not in l0.root_attrs
     # ...and its value is decoupled from the on-disk version values.
-    assert spec["spec_version"] not in {"2", "1.3"}
+    assert spec["spec_version"] not in {"3", "2.0"}
     assert spec["spec_version"] != spec["versions"]["l0_schema_version"]["value"]
     assert spec["spec_version"] != spec["versions"]["cal_schema_version"]["value"]
 
