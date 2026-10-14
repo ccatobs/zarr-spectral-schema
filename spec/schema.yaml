@@ -31,9 +31,15 @@
 # ── Storage rules (#20, ADR-0008) ──
 #
 # Object storage. A store is a local path or an object-store URL
-# (s3://bucket/store.zarr). Both validators read only zarr.json objects: they
-# list the children of each group node and stop at an array node, so they never
-# list or open a chunk key. A directory without a zarr.json is not a node.
+# (s3://bucket/store.zarr). An argument that starts with scheme:// is a URL, and
+# its path is percent-decoded; anything else is a local path, taken as it is.
+# Both validators read only zarr.json objects: they list the children of each
+# group node and stop at an array node, so they never list or open a chunk key.
+# A directory without a zarr.json is not a node, and the local walk does not
+# follow a symlinked directory. An I/O failure is an error, never a gap: a
+# group that cannot be listed is "'<rel>/': cannot list", a zarr.json that
+# cannot be read is "'<rel>': cannot read metadata" ([<level>] structure
+# findings; at the root, the only error).
 #
 # Chunk independence (invariant). A reader gives the same result for any chunk
 # shape and any shard shape. The contract states no chunk rule; a reader that
