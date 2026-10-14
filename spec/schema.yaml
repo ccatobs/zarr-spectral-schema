@@ -120,6 +120,9 @@ levels:
       #   - substitution markers: mjd (computed from DATE-OBS vs keyword),
       #     tsky (tamb-substituted vs keyword)
       raw_attrs:        { type: object, required: false }
+      # Per-scan completeness marker: zarr-fits writes it as the last write of a
+      # scan (kalibrate#101). Optional so stores written before it still validate.
+      l0_complete:      { type: boolean, required: false, equals: true }
     groups:
       source:                   # → const SOURCE_GROUP
         # L0 obs sub-group: arrays under scan_<N>/source/ (inline:false).
@@ -312,6 +315,7 @@ lists:
 
 # Single attribute-name constants → `pub const … : &str`.
 markers:
+  L0_COMPLETE_ATTR: l0_complete   # written last on an L0 scan group; absence ⇒ untrusted
   L1_COMPLETE_ATTR: l1_complete   # written last on an L1 scan/band group; absence ⇒ untrusted
 
 # Validator-only spec data (generates NO Rust const): for each canonical

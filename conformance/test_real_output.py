@@ -80,3 +80,18 @@ def test_root_child_not_matching_scan_pattern_is_rejected(stores):
 def test_l1_complete_false_is_rejected(stores):
     errors = zss.validate(stores / "l1_incomplete.zarr")
     assert any("l1_complete" in e and "must equal true" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "name, phrase",
+    [("l0_bad_l0_complete.zarr", "must be of type 'boolean'"), ("l0_incomplete.zarr", "must equal true")],
+)
+def test_l0_complete_marker_is_checked(stores, name, phrase):
+    errors = zss.validate(stores / name)
+    assert any("l0_complete" in e and phrase in e for e in errors), errors
+
+
+def test_l0_complete_marker_true_is_green(stores):
+    view = zss._store.read_store(stores / "l0.zarr")  # type: ignore[attr-defined]
+    assert view.group_attrs["scan_000001"]["l0_complete"] is True
+    assert zss.L0_COMPLETE_ATTR == "l0_complete"

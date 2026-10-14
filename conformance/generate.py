@@ -349,6 +349,9 @@ def emit_real_output_fixtures(out: Path) -> None:
     )
     # A root child named scan_* that does not match the scan pattern is an error.
     emit_l0(out / "l0_bad_scan_name.zarr", scans={_SCAN: [one_of[0]], "scan_12": [one_of[0]]})
+    # The optional L0 completeness marker is type-checked (boolean) and holds true.
+    emit_l0(out / "l0_bad_l0_complete.zarr", scan_attr_overrides={"l0_complete": "yes"})
+    emit_l0(out / "l0_incomplete.zarr", scan_attr_overrides={"l0_complete": False})
     # calibrate writes the provenance attrs as JSON objects.
     emit_l1_single(
         out / "l1_provenance_objects.zarr",

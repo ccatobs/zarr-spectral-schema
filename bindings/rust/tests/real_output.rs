@@ -98,3 +98,18 @@ fn l1_complete_false_is_rejected() {
         "expected a value-constraint error, got: {e:?}"
     );
 }
+
+#[test]
+fn l0_complete_marker_is_checked() {
+    assert_eq!(zss::L0_COMPLETE_ATTR, "l0_complete");
+    for (name, phrase) in [
+        ("l0_bad_l0_complete.zarr", "must be of type \"boolean\""),
+        ("l0_incomplete.zarr", "must equal true"),
+    ] {
+        let e = errors(name);
+        assert!(
+            e.iter().any(|m| m.contains("l0_complete") && m.contains(phrase)),
+            "{name}: expected an l0_complete error, got: {e:?}"
+        );
+    }
+}
