@@ -20,6 +20,10 @@
 //!   attrs, per-scan attrs, per-band attrs (multi-frontend), the scan-or-band
 //!   arrays/attrs, the L0 `source`/`calibration` sub-groups, and the diagnostic
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
+//!   The spec's `one_of` (exactly one of these groups per target), `equals`
+//!   (attr value constraint) and `prefix` (array family) fields are interpreted
+//!   the same way. Every structure finding starts with `[<level>] `; version and
+//!   level-detection errors do not (calibrate splits on this prefix, kalibrate#82).
 //! * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
 //!   is range-checked against the spec's supported window (`min_supported` ..
 //!   `value`): below the floor or a newer *major* is an error; a newer *minor* is
@@ -125,7 +129,8 @@ struct StoreView {
 
 fn load_spec() -> Spec {
     // The synced copy that build.rs also reads; include_str! is relative to this file.
-    serde_yaml::from_str(include_str!("../spec/schema.yaml")).expect("parse synced spec/schema.yaml")
+    serde_yaml::from_str(include_str!("../spec/schema.yaml"))
+        .expect("parse synced spec/schema.yaml")
 }
 
 /// Validate a Zarr v3 store against the spec. Returns errors; empty = conformant.
@@ -186,14 +191,24 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         .extend(view.errors.iter().map(|e| format!("[{level_name}] {e}")));
 
     // Root attrs declared for this level.
-    check_attrs(&view.root_attrs, &level.root_attrs, "root", level_name, result);
+    check_attrs(
+        &view.root_attrs,
+        &level.root_attrs,
+        "root",
+        level_name,
+        result,
+    );
 
     let needs_scans = !level.scan_attrs.is_empty()
         || !level.band_attrs.is_empty()
         || !level.scan_or_band_attrs.is_empty()
         || !level.groups.is_empty();
 
-    let root_children = view.groups.keys().chain(view.arrays.keys()).filter(|p| !p.contains('/'));
+    let root_children = view
+        .groups
+        .keys()
+        .chain(view.arrays.keys())
+        .filter(|p| !p.contains('/'));
     for name in root_children {
         if name.starts_with("scan_") && !is_scan(name) {
             result.errors.push(format!(
@@ -209,7 +224,6 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         return;
     }
 
-    let empty = Map::new();
     for sg in scan_groups {
         let bands: Vec<String> = view
             .groups
@@ -228,10 +242,19 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
 
         // `scan` placement resolves to the scan group; `scan_or_band` to the
         // scan group (single-frontend) or each band (multi-frontend).
-        let sob = if bands.is_empty() { vec![sg.clone()] } else { bands };
+        let sob = if bands.is_empty() {
+            vec![sg.clone()]
+        } else {
+            bands
+        };
         for t in &sob {
-            let attrs = view.groups.get(t).unwrap_or(&empty);
-            check_attrs(attrs, &level.scan_or_band_attrs, t, level_name, result);
+            check_attrs(
+                &view.groups[t],
+                &level.scan_or_band_attrs,
+                t,
+                level_name,
+                result,
+            );
         }
         for (placement, targets) in [("scan", vec![sg.clone()]), ("scan_or_band", sob)] {
             let placed: Vec<(&String, &Group)> = level
@@ -287,7 +310,13 @@ fn check_group_arrays(
     };
     for (array_name, aspec) in &group.arrays {
         let Some(family) = &aspec.prefix else {
-            check_array(view, &format!("{prefix}/{array_name}"), aspec, level_name, result);
+            check_array(
+                view,
+                &format!("{prefix}/{array_name}"),
+                aspec,
+                level_name,
+                result,
+            );
             continue;
         };
         let start = format!("{prefix}/{family}");
@@ -299,9 +328,9 @@ fn check_group_arrays(
             .collect();
         members.sort();
         if members.is_empty() && aspec.required {
-            result
-                .errors
-                .push(format!("[{level_name}] required array family '{start}*' is missing"));
+            result.errors.push(format!(
+                "[{level_name}] required array family '{start}*' is missing"
+            ));
         }
         for rel in members {
             check_array(view, rel, aspec, level_name, result);
@@ -318,9 +347,9 @@ fn check_array(
     result: &mut ValidationResult,
 ) {
     if view.groups.contains_key(rel) {
-        result
-            .errors
-            .push(format!("[{level_name}] '{rel}' is a group, expected an array"));
+        result.errors.push(format!(
+            "[{level_name}] '{rel}' is a group, expected an array"
+        ));
         return;
     }
     let Some((dtype, ndim)) = view.arrays.get(rel) else {
@@ -412,9 +441,9 @@ fn negotiate_versions(
             continue;
         }
         let Some(value) = root_attrs.get(attr_name) else {
-            result
-                .errors
-                .push(format!("root attribute '{attr_name}' is required but missing"));
+            result.errors.push(format!(
+                "root attribute '{attr_name}' is required but missing"
+            ));
             continue;
         };
         let disk = match vspec.on_disk.as_str() {
@@ -447,18 +476,19 @@ fn negotiate_versions(
 /// version (no minor) only exercises major.
 fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut ValidationResult) {
     let Some(store) = parse_version(disk) else {
-        result
-            .errors
-            .push(format!("root attribute '{attr_name}': cannot parse version {disk:?}"));
+        result.errors.push(format!(
+            "root attribute '{attr_name}': cannot parse version {disk:?}"
+        ));
         return;
     };
-    let (Some(current), Some(floor)) =
-        (parse_version(&vspec.value), parse_version(&vspec.min_supported))
-    else {
+    let (Some(current), Some(floor)) = (
+        parse_version(&vspec.value),
+        parse_version(&vspec.min_supported),
+    ) else {
         // The meta-schema guarantees these parse; defensive.
-        result
-            .errors
-            .push(format!("root attribute '{attr_name}': spec version range is malformed"));
+        result.errors.push(format!(
+            "root attribute '{attr_name}': spec version range is malformed"
+        ));
         return;
     };
 
@@ -499,16 +529,12 @@ const SCAN_PATTERN: &str = "^scan_[0-9]{6,}$";
 /// `scan_<6+ ASCII digits>` (writer pads to 6; frontend b of scan N is
 /// `scan_<N + 1000000·b>`).
 fn is_scan(name: &str) -> bool {
-    name.len() >= 11
-        && name.starts_with("scan_")
-        && name[5..].bytes().all(|b| b.is_ascii_digit())
+    name.len() >= 11 && name.starts_with("scan_") && name[5..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `band_<digits>` (writer: `band_{index}`, base-0, no zero-pad).
 fn is_band(name: &str) -> bool {
-    name.len() > 5
-        && name.starts_with("band_")
-        && name[5..].bytes().all(|b| b.is_ascii_digit())
+    name.len() > 5 && name.starts_with("band_") && name[5..].bytes().all(|b| b.is_ascii_digit())
 }
 
 // ── store reader (the per-language seam; parity with `_store.py`) ──────────
@@ -564,8 +590,12 @@ fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
                     view.groups.insert(rel, attributes(&meta));
                 }
                 Some("array") => {
-                    let ndim = meta.get("shape").and_then(Value::as_array).map_or(0, Vec::len);
-                    view.arrays.insert(rel, (dtype_name(meta.get("data_type")), ndim));
+                    let ndim = meta
+                        .get("shape")
+                        .and_then(Value::as_array)
+                        .map_or(0, Vec::len);
+                    view.arrays
+                        .insert(rel, (dtype_name(meta.get("data_type")), ndim));
                 }
                 _ => {}
             },
@@ -580,7 +610,9 @@ fn read_meta(path: &Path, rel: &str) -> Result<Option<Map<String, Value>>, Strin
     if !path.is_file() {
         return Ok(None);
     }
-    let text = std::fs::read(path).ok().and_then(|b| String::from_utf8(b).ok());
+    let text = std::fs::read(path)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok());
     match text.as_deref().map(serde_json::from_str::<Value>) {
         Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
         Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {
@@ -625,7 +657,11 @@ fn attributes(meta: &Map<String, Value>) -> Map<String, Value> {
 fn dtype_name(data_type: Option<&Value>) -> String {
     match data_type {
         Some(Value::String(s)) => s.clone(),
-        Some(Value::Object(o)) => o.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+        Some(Value::Object(o)) => o
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         _ => String::new(),
     }
 }

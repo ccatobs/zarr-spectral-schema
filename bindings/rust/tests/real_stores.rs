@@ -22,8 +22,16 @@ fn real_stores_are_green() {
     let real = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/real_stores");
     for name in REAL_STORES {
         let store = real.join(name);
-        assert!(store.join("zarr.json").is_file(), "real store missing: {}", store.display());
+        assert!(
+            store.join("zarr.json").is_file(),
+            "real store missing: {}",
+            store.display()
+        );
         let r = zss::check(&store);
-        assert!(r.errors.is_empty(), "{name}: expected zero errors, got: {:?}", r.errors);
+        assert!(
+            r.errors.is_empty(),
+            "{name}: expected zero errors, got: {:?}",
+            r.errors
+        );
     }
 }

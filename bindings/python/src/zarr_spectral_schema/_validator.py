@@ -14,7 +14,10 @@ Three checks today:
   Root attrs, per-scan attrs, per-band attrs (multi-frontend), the scan-or-band
   arrays/attrs, the L0 ``source``/``calibration`` sub-groups, and the diagnostic
   ``skydiff``/``skychopdiff`` sub-groups are all resolved by the same generic
-  walk — never hand-branched per field.
+  walk — never hand-branched per field. The spec's ``one_of`` (exactly one of
+  these groups per target), ``equals`` (attr value constraint) and ``prefix``
+  (array family) fields are interpreted the same way. Every structure finding
+  starts with ``[<level>] ``; version and level-detection errors do not.
 * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
   (``l0_schema_version`` integer, ``cal_schema_version`` ``major.minor``) is
   range-checked against the spec's supported window (``min_supported`` ..

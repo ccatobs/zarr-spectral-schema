@@ -48,7 +48,8 @@ fn scan_with_both_or_neither_group_is_rejected() {
     for name in ["l0_both_groups.zarr", "l0_no_group.zarr"] {
         let e = errors(name);
         assert!(
-            e.iter().any(|m| m.contains("scan_000001") && m.contains("exactly one of")),
+            e.iter()
+                .any(|m| m.contains("scan_000001") && m.contains("exactly one of")),
             "{name}: expected a one-of error, got: {e:?}"
         );
     }
@@ -65,7 +66,9 @@ fn provenance_attrs_as_objects_are_green() {
 fn l1_raw_attrs_must_be_object() {
     let e = errors("l1_bad_raw_attrs.zarr");
     assert!(
-        e.iter().any(|m| m.contains("raw_attrs") && m.contains("must be of type") && m.contains("object")),
+        e.iter().any(|m| m.contains("raw_attrs")
+            && m.contains("must be of type")
+            && m.contains("object")),
         "expected a raw_attrs type error, got: {e:?}"
     );
 }
@@ -85,7 +88,8 @@ fn scan_with_seven_digit_name_is_checked() {
 fn root_child_not_matching_scan_pattern_is_rejected() {
     let e = errors("l0_bad_scan_name.zarr");
     assert!(
-        e.iter().any(|m| m.contains("'scan_12'") && m.contains("scan pattern")),
+        e.iter()
+            .any(|m| m.contains("'scan_12'") && m.contains("scan pattern")),
         "expected a scan-pattern error naming scan_12, got: {e:?}"
     );
 }
@@ -94,7 +98,8 @@ fn root_child_not_matching_scan_pattern_is_rejected() {
 fn l1_complete_false_is_rejected() {
     let e = errors("l1_incomplete.zarr");
     assert!(
-        e.iter().any(|m| m.contains("l1_complete") && m.contains("must equal true")),
+        e.iter()
+            .any(|m| m.contains("l1_complete") && m.contains("must equal true")),
         "expected a value-constraint error, got: {e:?}"
     );
 }
@@ -108,7 +113,8 @@ fn l0_complete_marker_is_checked() {
     ] {
         let e = errors(name);
         assert!(
-            e.iter().any(|m| m.contains("l0_complete") && m.contains(phrase)),
+            e.iter()
+                .any(|m| m.contains("l0_complete") && m.contains(phrase)),
             "{name}: expected an l0_complete error, got: {e:?}"
         );
     }
@@ -118,8 +124,14 @@ fn l0_complete_marker_is_checked() {
 fn skydiff_family_member_dtype_and_ndim_are_checked() {
     let e = errors("l1_bad_skydiff.zarr");
     let rel = "scan_000001/skydiff/spectrum_0";
-    assert!(e.iter().any(|m| m.contains(rel) && m.contains("dtype")), "expected a dtype error, got: {e:?}");
-    assert!(e.iter().any(|m| m.contains(rel) && m.contains("ndim")), "expected an ndim error, got: {e:?}");
+    assert!(
+        e.iter().any(|m| m.contains(rel) && m.contains("dtype")),
+        "expected a dtype error, got: {e:?}"
+    );
+    assert!(
+        e.iter().any(|m| m.contains(rel) && m.contains("ndim")),
+        "expected an ndim error, got: {e:?}"
+    );
 }
 
 // ── 3. one strict parse path in both bindings ──────────────────────────────
@@ -157,7 +169,8 @@ fn group_at_array_path_is_rejected() {
 fn unicode_digits_in_version_are_rejected() {
     let e = errors("ver_unicode_digits.zarr");
     assert!(
-        e.iter().any(|m| m.contains("cal_schema_version") && m.contains("cannot parse version")),
+        e.iter()
+            .any(|m| m.contains("cal_schema_version") && m.contains("cannot parse version")),
         "expected a version parse error, got: {e:?}"
     );
 }
@@ -166,7 +179,8 @@ fn unicode_digits_in_version_are_rejected() {
 fn unicode_digits_in_scan_name_are_rejected() {
     let e = errors("l0_unicode_scan_name.zarr");
     assert!(
-        e.iter().any(|m| m.contains("'scan_٠٠٠٠٠٢'") && m.contains("scan pattern")),
+        e.iter()
+            .any(|m| m.contains("'scan_٠٠٠٠٠٢'") && m.contains("scan pattern")),
         "expected a scan-pattern error, got: {e:?}"
     );
 }
@@ -196,7 +210,8 @@ fn structure_findings_carry_the_level_prefix() {
         let e = errors(name);
         assert!(!e.is_empty(), "{name}: expected structure findings");
         assert!(
-            e.iter().all(|m| m.starts_with("[L0] ") || m.starts_with("[L1] ")),
+            e.iter()
+                .all(|m| m.starts_with("[L0] ") || m.starts_with("[L1] ")),
             "{name}: every structure finding must carry the [<level>] prefix, got: {e:?}"
         );
     }
