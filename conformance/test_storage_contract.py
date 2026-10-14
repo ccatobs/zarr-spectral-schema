@@ -41,3 +41,15 @@ def test_l1_float64_spectra_and_t_sys_are_green(stores):
 def test_l1_int16_spectra_is_rejected(stores):
     errors = zss.validate(stores / "l1_int16_spectra.zarr")
     assert any("scan_000001/spectra" in e and "'int16'" in e for e in errors), errors
+
+
+def test_l1_integer_keepbits_is_green(stores):
+    assert zss.validate(stores / "l1_keepbits.zarr") == []
+
+
+def test_l1_non_integer_keepbits_is_rejected(stores):
+    errors = zss.validate(stores / "l1_bad_keepbits.zarr")
+    assert any(
+        "keepbits" in e and "scan_000001/spectra" in e and "'integer'" in e
+        for e in errors
+    ), errors

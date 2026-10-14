@@ -96,6 +96,9 @@ struct ArraySpec {
     dtype: Dtype,
     ndim: usize,
     required: bool,
+    /// Attributes of the array itself (e.g. `keepbits`).
+    #[serde(default)]
+    attrs: BTreeMap<String, AttrSpec>,
     /// Array family: matches every array whose name starts with this prefix.
     #[serde(default)]
     prefix: Option<String>,
@@ -147,8 +150,8 @@ impl ValidationResult {
 struct StoreView {
     root_attrs: Map<String, Value>,
     groups: BTreeMap<String, Map<String, Value>>,
-    /// path → (dtype name, ndim)
-    arrays: BTreeMap<String, (String, usize)>,
+    /// path → (dtype name, ndim, attributes)
+    arrays: BTreeMap<String, (String, usize, Map<String, Value>)>,
     /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
     errors: Vec<String>,
 }
@@ -364,7 +367,7 @@ fn check_group_arrays(
     }
 }
 
-/// Check one array path: node type, presence (if required), dtype and ndim.
+/// Check one array path: node type, presence (if required), dtype, ndim, attrs.
 fn check_array(
     view: &StoreView,
     rel: &str,
@@ -378,7 +381,7 @@ fn check_array(
         ));
         return;
     }
-    let Some((dtype, ndim)) = view.arrays.get(rel) else {
+    let Some((dtype, ndim, attrs)) = view.arrays.get(rel) else {
         if aspec.required {
             result
                 .errors
@@ -398,6 +401,7 @@ fn check_array(
             aspec.ndim
         ));
     }
+    check_attrs(attrs, &aspec.attrs, rel, level_name, result);
 }
 
 /// Check declared attrs at one placement location (`where_` is the store path
@@ -620,8 +624,10 @@ fn walk(root: &Path, dir: &Path, view: &mut StoreView) {
                         .get("shape")
                         .and_then(Value::as_array)
                         .map_or(0, Vec::len);
-                    view.arrays
-                        .insert(rel, (dtype_name(meta.get("data_type")), ndim));
+                    view.arrays.insert(
+                        rel,
+                        (dtype_name(meta.get("data_type")), ndim, attributes(&meta)),
+                    );
                 }
                 _ => {}
             },

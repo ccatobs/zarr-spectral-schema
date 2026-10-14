@@ -240,7 +240,7 @@ def _check_group_arrays(
 def _check_array(
     view: StoreView, rel: str, aspec: dict, level_name: str, result: ValidationResult
 ) -> None:
-    """Check one array path: node type, presence (if required), dtype and ndim."""
+    """Check one array path: node type, presence (if required), dtype, ndim, attrs."""
     if rel in view.group_attrs:
         result.errors.append(f"[{level_name}] '{rel}' is a group, expected an array")
         return
@@ -258,6 +258,7 @@ def _check_array(
         result.errors.append(
             f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
         )
+    _check_attrs(arr.attrs, aspec.get("attrs", {}), rel, level_name, result)
 
 
 def _check_attrs(

@@ -50,3 +50,20 @@ fn l1_int16_spectra_is_rejected() {
         "expected a dtype error on spectra, got: {e:?}"
     );
 }
+
+#[test]
+fn l1_integer_keepbits_is_green() {
+    let e = errors("l1_keepbits.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}
+
+#[test]
+fn l1_non_integer_keepbits_is_rejected() {
+    let e = errors("l1_bad_keepbits.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("keepbits")
+            && m.contains("scan_000001/spectra")
+            && m.contains("\"integer\"")),
+        "expected a keepbits type error, got: {e:?}"
+    );
+}

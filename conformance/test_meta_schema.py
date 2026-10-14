@@ -54,6 +54,12 @@ def test_real_spec_passes_meta_schema():
             id="empty-dtype-set",
         ),
         pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"]["spectra"]["attrs"][
+                "keepbits"
+            ].__setitem__("type", "int"),
+            id="array-attr-unknown-type",
+        ),
+        pytest.param(
             lambda s: s["versions"]["l0_schema_version"].__setitem__(
                 "on_disk", "float"
             ),

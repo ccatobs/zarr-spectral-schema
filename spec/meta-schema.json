@@ -171,6 +171,10 @@
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
         "required": { "type": "boolean" },
+        "attrs": {
+          "description": "Attributes of the array itself (e.g. keepbits), checked like group attrs.",
+          "$ref": "#/$defs/attrs"
+        },
         "prefix": {
           "description": "Array family: the entry matches every array in the group whose name starts with this prefix (e.g. spectrum_ for spectrum_0, spectrum_1_3). `required` then means at least one member.",
           "type": "string",

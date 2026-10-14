@@ -24,6 +24,7 @@ from typing import Any
 class ArrayView:
     dtype: str
     shape: list[int]
+    attrs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ndim(self) -> int:
@@ -70,6 +71,7 @@ def read_store(store_path: str | Path) -> StoreView:
             view.arrays[rel] = ArrayView(
                 dtype=_dtype_name(meta.get("data_type")),
                 shape=shape if isinstance(shape, list) else [],
+                attrs=_attributes(meta),
             )
         elif meta.get("node_type") == "group":
             view.group_attrs[rel] = _attributes(meta)

@@ -114,7 +114,8 @@ def _write_arrays(
     (the fixtures emit a realistic subset so optional-present paths are exercised).
     An array family (``prefix``) is emitted as its first member ``<prefix>0``.
     ``array_overrides`` maps a store-relative path to ``dtype``/``ndim`` values
-    that replace the declared ones (wrong-typed negatives).
+    that replace the declared ones (wrong-typed negatives), and ``attr_values``
+    to literal array attr values.
     """
     array_overrides = array_overrides or {}
     for array_name, aspec in group_spec.get("arrays", {}).items():
@@ -130,7 +131,10 @@ def _write_arrays(
         dtype = (
             aspec["dtype"][0] if isinstance(aspec["dtype"], list) else aspec["dtype"]
         )
-        parent.create_array(name=name, shape=shape, dtype=dtype)
+        arr = parent.create_array(name=name, shape=shape, dtype=dtype)
+        _write_attrs(
+            arr, aspec.get("attrs", {}), set(), emit_optional, aspec.get("attr_values")
+        )
 
 
 def _write_version_attrs(
@@ -469,6 +473,15 @@ def emit_storage_fixtures(out: Path) -> None:
     emit_l1_single(
         out / "l1_int16_spectra.zarr",
         array_overrides={f"{_SCAN}/spectra": {"dtype": "int16"}},
+    )
+    # keepbits (the bit rounding a writer applied) is an integer where present.
+    emit_l1_single(
+        out / "l1_keepbits.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": 12}}},
+    )
+    emit_l1_single(
+        out / "l1_bad_keepbits.zarr",
+        array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": "12"}}},
     )
 
 
