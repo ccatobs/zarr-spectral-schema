@@ -67,6 +67,25 @@ def test_real_spec_passes_meta_schema():
             lambda s: s["precedence_aliases"]["pixel_offset"].__setitem__("bogus", 1),
             id="precedence-alias-extra-key",
         ),
+        # #18: a group without placement/inline, or a level without detect, would
+        # make the validators skip its content; the meta-schema rejects it.
+        pytest.param(
+            lambda s: s["levels"]["L0"]["groups"]["source"].pop("placement"),
+            id="group-missing-placement",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L0"]["groups"]["source"].pop("inline"),
+            id="group-missing-inline",
+        ),
+        pytest.param(lambda s: s["levels"]["L1"].pop("detect"), id="level-missing-detect"),
+        pytest.param(
+            lambda s: s["versions"]["cal_schema_version"].__setitem__("value", "abc"),
+            id="version-value-abc",
+        ),
+        pytest.param(
+            lambda s: s["versions"]["cal_schema_version"].__setitem__("min_supported", "1.x"),
+            id="version-min_supported-not-numeric",
+        ),
     ],
 )
 def test_malformed_spec_is_rejected(mutate):
@@ -76,3 +95,20 @@ def test_malformed_spec_is_rejected(mutate):
     mutate(spec)
     validator = Draft202012Validator(load_meta_schema())
     assert list(validator.iter_errors(spec)), "meta-schema should have rejected this mutation"
+
+
+def test_each_detect_attr_names_a_version_of_its_level():
+    # Level detection and version negotiation share one attr: the detect attr of
+    # a level must be a `versions` entry of that level.
+    spec = load_spec()
+    for level_name, level in spec["levels"].items():
+        version = spec["versions"].get(level["detect"])
+        assert version is not None, f"{level_name}: detect {level['detect']!r} names no version"
+        assert version["level"] == level_name
+
+
+def test_each_one_of_member_names_a_group_of_its_level():
+    spec = load_spec()
+    for level_name, level in spec["levels"].items():
+        for name in level.get("one_of", []):
+            assert name in level["groups"], f"{level_name}: one_of names unknown group {name!r}"

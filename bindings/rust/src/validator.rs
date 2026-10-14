@@ -53,8 +53,7 @@ struct VersionSpec {
 #[derive(Deserialize)]
 struct Level {
     /// Root attribute whose presence marks a store as this level.
-    #[serde(default)]
-    detect: Option<String>,
+    detect: String,
     /// Groups of which each placement target holds exactly one.
     #[serde(default)]
     one_of: Vec<String>,
@@ -82,10 +81,8 @@ struct AttrSpec {
 #[derive(Deserialize)]
 struct Group {
     /// `scan` | `scan_or_band` — where this group's arrays live relative to a scan.
-    #[serde(default)]
-    placement: Option<String>,
+    placement: String,
     /// true ⇒ arrays sit directly in the target dir; false ⇒ under `<target>/<name>/`.
-    #[serde(default)]
     inline: bool,
     arrays: BTreeMap<String, ArraySpec>,
 }
@@ -153,19 +150,11 @@ pub fn check(store: &Path) -> ValidationResult {
     let applicable: Vec<(&String, &Level)> = spec
         .levels
         .iter()
-        .filter(|(_, lvl)| {
-            lvl.detect
-                .as_deref()
-                .is_some_and(|d| view.root_attrs.contains_key(d))
-        })
+        .filter(|(_, lvl)| view.root_attrs.contains_key(&lvl.detect))
         .collect();
 
     if applicable.is_empty() {
-        let mut detects: Vec<&str> = spec
-            .levels
-            .values()
-            .filter_map(|l| l.detect.as_deref())
-            .collect();
+        let mut detects: Vec<&str> = spec.levels.values().map(|l| l.detect.as_str()).collect();
         detects.sort_unstable();
         result.errors.push(format!(
             "store declares no known level: none of the detect attributes {detects:?} \
@@ -241,7 +230,7 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
             let placed: Vec<(&String, &Group)> = level
                 .groups
                 .iter()
-                .filter(|(_, g)| g.placement.as_deref() == Some(placement))
+                .filter(|(_, g)| g.placement == placement)
                 .collect();
             let one_of: Vec<&String> = level
                 .one_of

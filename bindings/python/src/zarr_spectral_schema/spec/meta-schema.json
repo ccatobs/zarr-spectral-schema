@@ -54,6 +54,11 @@
       "type": "string",
       "pattern": "^[A-Z][A-Z0-9_]*$"
     },
+    "version_value": {
+      "description": "An on-disk version: major or major.minor, ASCII digits only (the grammar both bindings parse).",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
     "version": {
       "type": "object",
       "required": ["level", "on_disk", "value", "min_supported"],
@@ -64,8 +69,8 @@
           "description": "How the value is encoded in the store attribute.",
           "enum": ["integer", "string"]
         },
-        "value": { "type": "string" },
-        "min_supported": { "type": "string" },
+        "value": { "$ref": "#/$defs/version_value" },
+        "min_supported": { "$ref": "#/$defs/version_value" },
         "const": {
           "description": "Override the generated Rust const identifier (default UPPER(attr key)).",
           "$ref": "#/$defs/ident"
@@ -74,7 +79,7 @@
     },
     "level": {
       "type": "object",
-      "required": ["groups"],
+      "required": ["detect", "groups"],
       "additionalProperties": false,
       "properties": {
         "detect": {
@@ -101,7 +106,7 @@
     },
     "group": {
       "type": "object",
-      "required": ["arrays"],
+      "required": ["placement", "inline", "arrays"],
       "additionalProperties": false,
       "properties": {
         "const": {
