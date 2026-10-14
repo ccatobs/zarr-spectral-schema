@@ -177,7 +177,8 @@ struct StoreView {
 /// One array node of the view (parity with the Python `ArrayView`).
 struct ArrayMeta {
     dtype: String,
-    shape: Vec<u64>,
+    /// List of non-negative integers, or `None` when the metadata holds anything else.
+    shape: Option<Vec<u64>>,
     /// zarr v3 `dimension_names` as parsed (`None` when absent or null).
     dimension_names: Option<Value>,
     attrs: Map<String, Value>,
@@ -489,14 +490,19 @@ fn check_array(
             arr.dtype, aspec.dtype
         ));
     }
-    if arr.shape.len() != aspec.ndim {
-        result.errors.push(format!(
+    match &arr.shape {
+        None => result.errors.push(format!(
+            "[{level_name}] array '{rel}' shape is not a list of non-negative integers"
+        )),
+        Some(shape) if shape.len() != aspec.ndim => result.errors.push(format!(
             "[{level_name}] array '{rel}' ndim {} != expected {}",
-            arr.shape.len(),
+            shape.len(),
             aspec.ndim
-        ));
-    } else if arr.shape.len() == aspec.dims.len() {
-        seen.push((rel.to_string(), aspec.dims.clone(), arr.shape.clone()));
+        )),
+        Some(shape) if shape.len() == aspec.dims.len() => {
+            seen.push((rel.to_string(), aspec.dims.clone(), shape.clone()));
+        }
+        Some(_) => {}
     }
     let dims: Vec<Value> = aspec.dims.iter().cloned().map(Value::String).collect();
     match &arr.dimension_names {
@@ -945,8 +951,7 @@ fn walk<B: Backend>(
                     let shape = meta
                         .get("shape")
                         .and_then(Value::as_array)
-                        .map(|s| s.iter().map(|n| n.as_u64().unwrap_or(0)).collect())
-                        .unwrap_or_default();
+                        .and_then(|s| s.iter().map(Value::as_u64).collect());
                     let dimension_names = meta
                         .get("dimension_names")
                         .filter(|v| !v.is_null())

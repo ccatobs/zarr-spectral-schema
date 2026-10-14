@@ -119,14 +119,16 @@ versions:
   l0_schema_version:            # → const L0_SCHEMA_VERSION
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
-    # 3 (#19): identity required, dims/units, site location, scan_N/band_B layout.
+    # 3 (#19): identity and l0_complete required, dims/units, site location,
+    # scan_N/band_B layout. The validator accepts the current major only.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
     level: L1
     on_disk: string             # cal-io writes this root attr as a JSON string
-    # 2.0 (#19): dims/units, the required frame set, band placement of identity,
-    # quality record and provenance in multi-frontend stores.
+    # 2.0 (#19): dims/units, the required frame set, identity required and at
+    # band placement with the quality record and provenance in multi-frontend
+    # stores. The validator accepts the current major only.
     value: "2.0"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
@@ -215,8 +217,9 @@ levels:
       #     tsky (tamb-substituted vs keyword)
       raw_attrs:        { type: object, required: true }
       # Completeness marker: zarr-fits writes it as the last write of a scan or
-      # band (kalibrate#101). Optional so stores written before it still validate.
-      l0_complete:      { type: boolean, required: false, equals: true }
+      # band (kalibrate#101). Required since L0 3, as l1_complete is at L1: a
+      # reader reads no unit without its completeness marker.
+      l0_complete:      { type: boolean, required: true, equals: true }
     groups:
       source:                   # → const SOURCE_GROUP
         # L0 obs sub-group: arrays under scan_<N>/source/, or
@@ -341,14 +344,13 @@ levels:
       rest_freq_hz: { type: number,  required: true }
       # Completeness marker, written last (calibrated.rs:544-549).
       l1_complete:  { type: boolean, required: true, equals: true }
-      # Identity, forwarded from L0 (ADR-0007). `frontend` is guarded by
-      # `if !arrays.is_empty()` on the writer side → required:false.
+      # Identity, forwarded from L0 (ADR-0007); required since L1 2.0.
       arrays:           { type: array,   required: true }
       pixels_per_array: { type: array,   required: true }
-      frontend:         { type: string,  required: false }
+      frontend:         { type: string,  required: true }
       # Verbatim source-keyword provenance forwarded from L0. Top-level object
       # type-checked only.
-      raw_attrs:        { type: object,  required: false }
+      raw_attrs:        { type: object,  required: true }
       # Quality record.
       qa:               { type: object,  required: true }
       pwv_mm:           { type: number,  required: true }

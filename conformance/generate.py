@@ -60,6 +60,15 @@ FRAME_ATTRS = (
     "site_latitude_deg",
     "site_altitude_m",
 )
+# Malformed `shape` values of one array: one fixture each.
+BAD_SHAPES = {
+    "string": ["1"],
+    "null": [None],
+    "nested": [[1]],
+    "float": [1.0],
+    "negative": [-1],
+}
+
 FRAME_ARRAYS = (
     "v_frame",
     "ref_lon",
@@ -679,6 +688,19 @@ def emit_self_description_fixtures(out: Path) -> None:
     emit_l1_multi(out / "l1_multi_band_without_qa.zarr", omit_band_attrs={1: {"qa"}})
     store = emit_l1_multi(out / "l1_multi_scan_arrays.zarr")
     zarr.open_group(store=str(store), mode="r+")[_SCAN].attrs["arrays"] = ["HFA"]
+    # Required since L0 3 / L1 2.0 (maintainer, 2026-10-14): the L0 completeness
+    # marker on each scan placement target, the L1 identity at scan-or-band.
+    emit_l0(out / "l0_no_l0_complete.zarr", omit_attrs={"l0_complete"})
+    emit_l1_single(out / "l1_no_identity.zarr", omit_attrs={"frontend", "raw_attrs"})
+    # A shape that is not a list of non-negative integers is a finding of its
+    # own, not an exception and not a length (review of PR 25, round 1).
+    for name, shape in BAD_SHAPES.items():
+        store = emit_l1_single(out / f"l1_shape_{name}.zarr")
+        _patch_meta(
+            store,
+            f"{_SCAN}/t_int",
+            lambda m, shape=shape: m.__setitem__("shape", shape),
+        )
     # Multi-frontend L0: scan_N/band_B/, every band checked.
     emit_l0(out / "l0_multi.zarr", n_bands=2)
     emit_l0(

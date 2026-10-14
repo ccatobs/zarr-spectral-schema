@@ -288,7 +288,11 @@ def _check_array(
         result.errors.append(
             f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )
-    if arr.ndim != aspec["ndim"]:
+    if arr.shape is None:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' shape is not a list of non-negative integers"
+        )
+    elif arr.ndim != aspec["ndim"]:
         result.errors.append(
             f"[{level_name}] array '{rel}' ndim {arr.ndim} != expected {aspec['ndim']}"
         )

@@ -276,6 +276,8 @@ SELF_DESCRIPTION_NEGATIVES = [
     "l1_multi_band_without_qa.zarr",
     "l1_multi_scan_arrays.zarr",
     "l0_multi_band_without_data.zarr",
+    "l0_no_l0_complete.zarr",
+    "l1_no_identity.zarr",
 ]
 
 
@@ -284,3 +286,33 @@ def test_new_structure_findings_carry_the_level_prefix(stores, name):
     errors = zss.validate(stores / name)
     assert errors, f"{name}: expected structure findings"
     assert all(e.startswith(("[L0] ", "[L1] ")) for e in errors), errors
+
+
+# ── a malformed shape is a finding, never an exception (PR 25 review) ──────
+# Both bindings pin the same full error list, so their verdicts agree.
+
+
+@pytest.mark.parametrize("name", sorted(generate.BAD_SHAPES))
+def test_malformed_shape_is_one_finding_in_both_bindings(stores, name):
+    errors = zss.validate(stores / f"l1_shape_{name}.zarr")
+    assert errors == [
+        "[L1] array 'scan_000001/t_int' shape is not a list of non-negative integers"
+    ]
+
+
+# ── required since L0 3 / L1 2.0 (maintainer decisions of 2026-10-14) ──────
+
+
+def test_l0_scan_without_its_completeness_marker_is_rejected(stores):
+    errors = zss.validate(stores / "l0_no_l0_complete.zarr")
+    assert (
+        "[L0] required attribute 'l0_complete' is missing at 'scan_000001'" in errors
+    ), errors
+
+
+@pytest.mark.parametrize("name", ["frontend", "raw_attrs"])
+def test_l1_scan_without_its_identity_is_rejected(stores, name):
+    errors = zss.validate(stores / "l1_no_identity.zarr")
+    assert f"[L1] required attribute '{name}' is missing at 'scan_000001'" in errors, (
+        errors
+    )

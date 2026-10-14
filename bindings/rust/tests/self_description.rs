@@ -353,6 +353,8 @@ fn new_structure_findings_carry_the_level_prefix() {
         "l1_multi_band_without_qa.zarr",
         "l1_multi_scan_arrays.zarr",
         "l0_multi_band_without_data.zarr",
+        "l0_no_l0_complete.zarr",
+        "l1_no_identity.zarr",
     ] {
         let e = errors(name);
         assert!(!e.is_empty(), "{name}: expected structure findings");
@@ -361,5 +363,38 @@ fn new_structure_findings_carry_the_level_prefix() {
                 .all(|m| m.starts_with("[L0] ") || m.starts_with("[L1] ")),
             "{name}: every structure finding must carry the [<level>] prefix, got: {e:?}"
         );
+    }
+}
+
+// ── a malformed shape is a finding, never an exception (PR 25 review) ──────
+// Both bindings pin the same full error list, so their verdicts agree.
+
+#[test]
+fn malformed_shape_is_one_finding_in_both_bindings() {
+    for name in ["float", "negative", "nested", "null", "string"] {
+        let e = errors(&format!("l1_shape_{name}.zarr"));
+        assert_eq!(
+            e,
+            ["[L1] array 'scan_000001/t_int' shape is not a list of non-negative integers"],
+            "{name}"
+        );
+    }
+}
+
+// ── required since L0 3 / L1 2.0 (maintainer decisions of 2026-10-14) ──────
+
+#[test]
+fn l0_scan_without_its_completeness_marker_is_rejected() {
+    let e = errors("l0_no_l0_complete.zarr");
+    let want = "[L0] required attribute 'l0_complete' is missing at 'scan_000001'";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
+}
+
+#[test]
+fn l1_scan_without_its_identity_is_rejected() {
+    let e = errors("l1_no_identity.zarr");
+    for name in ["frontend", "raw_attrs"] {
+        let want = format!("[L1] required attribute '{name}' is missing at 'scan_000001'");
+        assert!(e.contains(&want), "expected {want:?}, got: {e:?}");
     }
 }
