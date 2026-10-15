@@ -624,12 +624,31 @@ def emit_storage_fixtures(out: Path) -> None:
     store = emit_l0(out / "l0_float_fill_value.zarr")
     _patch_meta(store, counts, lambda m: m.__setitem__("fill_value", 4294967295.0))
     emit_l0(out / "l0_bad_fill_value.zarr", array_overrides={counts: {"fill_value": 0}})
-    # One FITS header per array: raw_fits_headers is [array, subscan], not [subscan].
+
+    # One FITS header per pixel: raw_fits_headers and frontend_backends are
+    # [receiver, array, subscan]. The old [subscan] and [array, subscan] shapes
+    # are errors, and so is a receiver or array length that differs from data_5d.
+    def _header_override(**over):
+        return {
+            f"{_SCAN}/source/{n}": over
+            for n in ("raw_fits_headers", "frontend_backends")
+        }
+
     emit_l0(
         out / "l0_headers_1d.zarr",
-        array_overrides={
-            f"{_SCAN}/source/raw_fits_headers": {"ndim": 1, "dims": ["subscan"]}
-        },
+        array_overrides=_header_override(ndim=1, dims=["subscan"]),
+    )
+    emit_l0(
+        out / "l0_headers_array_subscan.zarr",
+        array_overrides=_header_override(ndim=2, dims=["array", "subscan"]),
+    )
+    emit_l0(
+        out / "l0_headers_receiver_mismatch.zarr",
+        array_overrides=_header_override(shape=(2, 1, 1)),
+    )
+    emit_l0(
+        out / "l0_headers_array_mismatch.zarr",
+        array_overrides=_header_override(shape=(1, 2, 1)),
     )
     # gamma is counts per second per kelvin; the old unit was ct/K.
     emit_l1_single(
