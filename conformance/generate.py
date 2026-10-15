@@ -624,6 +624,18 @@ def emit_storage_fixtures(out: Path) -> None:
     store = emit_l0(out / "l0_float_fill_value.zarr")
     _patch_meta(store, counts, lambda m: m.__setitem__("fill_value", 4294967295.0))
     emit_l0(out / "l0_bad_fill_value.zarr", array_overrides={counts: {"fill_value": 0}})
+    # One FITS header per array: raw_fits_headers is [array, subscan], not [subscan].
+    emit_l0(
+        out / "l0_headers_1d.zarr",
+        array_overrides={
+            f"{_SCAN}/source/raw_fits_headers": {"ndim": 1, "dims": ["subscan"]}
+        },
+    )
+    # gamma is counts per second per kelvin; the old unit was ct/K.
+    emit_l1_single(
+        out / "l1_gamma_old_unit.zarr",
+        array_overrides={f"{_SCAN}/gamma": {"units": "ct/K"}},
+    )
     # The valid dump count per subscan is int32 [S] where present.
     bad = {"dtype": "float64", "ndim": 2, "dims": ["dump", "subscan"]}
     emit_l0(

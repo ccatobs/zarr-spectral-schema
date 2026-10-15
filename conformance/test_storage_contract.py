@@ -177,3 +177,25 @@ def test_l0_float_fill_value_is_a_mismatch(stores):
         L0_COUNTS in e and "fill_value 4294967295.0 != expected 4294967295" in e
         for e in errors
     ), errors
+
+
+# ── 9. one FITS header per array; gamma in counts per second per kelvin ───
+
+
+def test_l0_headers_per_array_are_green(stores):
+    assert zss.validate(stores / "l0_sharded.zarr") == []
+
+
+def test_l0_headers_without_the_array_axis_are_rejected(stores):
+    errors = zss.validate(stores / "l0_headers_1d.zarr")
+    rel = "scan_000001/source/raw_fits_headers"
+    assert any(rel in e and "ndim 1 != expected 2" in e for e in errors), errors
+    assert any(rel in e and "dimension_names" in e for e in errors), errors
+
+
+def test_l1_gamma_in_counts_per_kelvin_is_a_units_error(stores):
+    errors = zss.validate(stores / "l1_gamma_old_unit.zarr")
+    assert any(
+        "scan_000001/gamma" in e and 'units "ct/K" != expected "ct/(K s)"' in e
+        for e in errors
+    ), errors

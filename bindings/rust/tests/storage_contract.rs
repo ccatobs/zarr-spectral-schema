@@ -137,6 +137,34 @@ fn l0_float_fill_value_is_a_mismatch() {
     );
 }
 
+// ── 9. one FITS header per array; gamma in counts per second per kelvin ──
+
+#[test]
+fn l0_headers_without_the_array_axis_are_rejected() {
+    let e = errors("l0_headers_1d.zarr");
+    let rel = "scan_000001/source/raw_fits_headers";
+    assert!(
+        e.iter()
+            .any(|m| m.contains(rel) && m.contains("ndim 1 != expected 2")),
+        "expected an ndim error, got: {e:?}"
+    );
+    assert!(
+        e.iter()
+            .any(|m| m.contains(rel) && m.contains("dimension_names")),
+        "expected a dimension_names error, got: {e:?}"
+    );
+}
+
+#[test]
+fn l1_gamma_in_counts_per_kelvin_is_a_units_error() {
+    let e = errors("l1_gamma_old_unit.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/gamma")
+            && m.contains("units \"ct/K\" != expected \"ct/(K s)\"")),
+        "expected a units error, got: {e:?}"
+    );
+}
+
 // ── 7. one writer per store: source_l0_store holds a URI reference ────────
 
 #[test]
