@@ -85,7 +85,7 @@ class StoreView:
         Each array as an :class:`ArrayView`, keyed by path such as ``scan_000001/source/data_5d``.
     errors
         Parse errors of non-root ``zarr.json`` files. A node that does not parse
-        leaves the walk; its children stay in the view.
+        is left out of the view together with its subtree.
     """
 
     root_attrs: dict[str, Any]

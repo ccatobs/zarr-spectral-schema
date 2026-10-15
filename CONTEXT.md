@@ -37,12 +37,12 @@ single-frontend scan, or at each **band group** (`band_<B>/`) of a
 multi-frontend scan. The validator resolves this generically from the
 `band_<B>` children. A scan-or-band attr on the scan group of a multi-frontend
 scan is a structure finding. Producers write per band to avoid last-band-wins
-misattribution of geometry (ADR 0011).
+misattribution of geometry (ADR 0011, the band layout).
 
 ### Band
 The per-frontend group `band_<B>` under a scan, at L0 and L1. `B` is the band
 index. A scan with at least one band group is a multi-frontend scan. The layout
-`scan_N/band_B/` replaces the virtual scan number `N + 1000000 × b` (ADR 0011).
+`scan_N/band_B/` replaces the virtual scan number `N + 1000000 × b` (ADR 0011, the band layout).
 
 ### Placement target
 A scan group, or a band group of a multi-frontend scan. The shared-dimension
@@ -64,14 +64,14 @@ The `equals` field of a spec attr: the attr holds exactly that value, for
 example `l1_complete` holds `true`.
 
 ### Structure finding / version error
-The two classes of validator error (ADR 0009). A structure finding starts with
+The two classes of validator error (ADR 0009, validator error classes). A structure finding starts with
 `[<level>] ` and names one node that breaks the contract. A version error (and a
 level-detection error) has no prefix and means the store cannot be read at all.
 
 ### Below-floor store
 An L0 or L1 store older than `min_supported`. The validators report one version
-error for it; readers open it through version-gated shims (ADR 0007, amendment
-of 2026-10-14).
+error for it, followed by structure findings for the fields it lacks; readers
+open it through version-gated shims (ADR 0007, one spec as the source of truth, amendment of 2026-10-14).
 
 ### Completeness marker
 `l0_complete` and `l1_complete`: the per-unit attr a producer writes last, and a
@@ -80,7 +80,7 @@ reader checks before it reads the unit. A unit without its marker is incomplete.
 ### Not-applicable sentinel
 The value of a required field that does not apply: `"NONE"` in a string attr,
 JSON null in a number attr, NaN fill in an array. The field is present all the
-same (ADR 0007, amendment of 2026-10-14).
+same (ADR 0007, one spec as the source of truth, amendment of 2026-10-14).
 
 ### Frame set
 The required L1 fields of the spectral, position, intensity and site frame of a
@@ -89,7 +89,7 @@ scan or band, for example `specsys`, `ref_lon`, `temperature_scale` and
 
 ### Saturated counter
 The L0 count fill value 4294967295 (u32::MAX). A reading equal to it is not a
-valid count (ADR 0013).
+valid count (ADR 0013, L0 counts are uint32).
 
 ### Count rate
 Counts per second. The base of the L1 `gamma` unit, `ct/(K s)`.
@@ -100,7 +100,7 @@ The number of valid dumps per subscan before padding.
 ### Producer / consumer
 A producer is the one tool that writes a store: zarr-fits writes L0, calibrate
 writes L1. A consumer only reads a store and writes its output to a store of
-its own (ADR 0008, amendment 1).
+its own (ADR 0008, amendment 1: one writer per store).
 
 ### URI reference (store link)
 A link from one store to another, for example `source_l0_store`: an absolute URI

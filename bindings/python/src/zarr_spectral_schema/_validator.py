@@ -116,7 +116,9 @@ def check(store_path: str | Path) -> ValidationResult:
 
     The validator reads ``zarr.json`` objects only, never a chunk. It accepts the
     current major version of each level (L0 3, L1 2.0). A store below
-    ``min_supported`` gets one version error.
+    ``min_supported`` gets one version error, without a prefix. Structure
+    findings follow when the store lacks fields of the current version; a
+    consumer stops on the version error.
 
     Parameters
     ----------
