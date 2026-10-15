@@ -141,3 +141,32 @@ def test_unlistable_local_group_is_an_error(tmp_path):
     finally:
         skydiff.chmod(0o755)
     assert errors == ["[L1] 'scan_000001/skydiff/': cannot list"]
+
+
+# ── 8. L0 counts: uint32 with a saturated-counter fill value ──────────────
+
+L0_COUNTS = "scan_000001/source/data_5d"
+
+
+def test_l0_counts_are_uint32_with_the_saturated_fill_value(stores):
+    meta = json.loads(
+        (stores / "l0_sharded.zarr" / L0_COUNTS / "zarr.json").read_text()
+    )
+    assert meta["data_type"] == "uint32"
+    assert meta["fill_value"] == 4294967295
+
+
+def test_l0_int32_counts_are_a_dtype_error_naming_data_5d(stores):
+    errors = zss.validate(stores / "l0_int32_counts.zarr")
+    assert any(L0_COUNTS in e and "dtype" in e and "uint32" in e for e in errors), (
+        errors
+    )
+
+
+def test_l0_wrong_fill_value_names_the_array_expected_and_found(stores):
+    errors = zss.validate(stores / "l0_bad_fill_value.zarr")
+    assert any(
+        L0_COUNTS in e and "fill_value" in e and "4294967295" in e and "0" in e
+        for e in errors
+    ), errors
+    assert all(e.startswith("[L0] ") for e in errors), errors

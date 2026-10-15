@@ -200,7 +200,12 @@ def _write_arrays(
             dimension_names=aspec.get("dims"),
             attributes={} if aspec.get("units") is None else {"units": aspec["units"]},
             # NaN fill on float arrays: the not-applicable value of an array.
-            fill_value=float("nan") if dtype.startswith("float") else None,
+            # A declared fill_value (L0 counts: saturated counter) wins.
+            fill_value=aspec["fill_value"]
+            if "fill_value" in aspec
+            else float("nan")
+            if dtype.startswith("float")
+            else None,
             **layout,
         )
         _write_attrs(
@@ -610,6 +615,14 @@ def emit_storage_fixtures(out: Path) -> None:
         out / "l1_bad_keepbits.zarr",
         array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": "12"}}},
     )
+    # L0 counts are uint32 with the saturated-counter fill value (#27).
+    counts = f"{_SCAN}/source/data_5d"
+    # int32 cannot hold the uint32 fill value, so the old store carries 0.
+    emit_l0(
+        out / "l0_int32_counts.zarr",
+        array_overrides={counts: {"dtype": "int32", "fill_value": 0}},
+    )
+    emit_l0(out / "l0_bad_fill_value.zarr", array_overrides={counts: {"fill_value": 0}})
     # The valid dump count per subscan is int32 [S] where present.
     bad = {"dtype": "float64", "ndim": 2, "dims": ["dump", "subscan"]}
     emit_l0(

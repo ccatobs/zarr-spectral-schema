@@ -291,6 +291,13 @@ def _check_array(
         result.errors.append(
             f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
         )
+    if "fill_value" in aspec:
+        want, got = aspec["fill_value"], arr.fill_value
+        if isinstance(got, bool) or not isinstance(got, (int, float)) or got != want:
+            result.errors.append(
+                f"[{level_name}] array '{rel}' fill_value {json.dumps(got)} "
+                f"!= expected {json.dumps(want)}"
+            )
     if arr.shape is None:
         result.errors.append(
             f"[{level_name}] array '{rel}' shape is not a list of non-negative integers"

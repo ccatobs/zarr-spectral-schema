@@ -115,6 +115,9 @@ struct ArraySpec {
     #[serde(default)]
     units: Option<String>,
     required: bool,
+    /// Fill value the array must declare in its Zarr metadata.
+    #[serde(default)]
+    fill_value: Option<serde_json::Number>,
     /// Attributes of the array itself (e.g. `keepbits`).
     #[serde(default)]
     attrs: BTreeMap<String, AttrSpec>,
@@ -182,6 +185,8 @@ struct ArrayMeta {
     /// zarr v3 `dimension_names` as parsed (`None` when absent or null).
     dimension_names: Option<Value>,
     attrs: Map<String, Value>,
+    /// zarr v3 `fill_value` as parsed (`None` when absent).
+    fill_value: Option<Value>,
 }
 
 fn load_spec() -> Spec {
@@ -489,6 +494,17 @@ fn check_array(
             "[{level_name}] array '{rel}' dtype {:?} != expected {}",
             arr.dtype, aspec.dtype
         ));
+    }
+    if let Some(want) = &aspec.fill_value {
+        let want = Value::Number(want.clone());
+        let same = matches!(&arr.fill_value, Some(Value::Number(got))
+            if got.as_f64() == want.as_f64() && got.as_f64().is_some());
+        if !same {
+            let got = arr.fill_value.as_ref().map_or("null".to_string(), Value::to_string);
+            result.errors.push(format!(
+                "[{level_name}] array '{rel}' fill_value {got} != expected {want}"
+            ));
+        }
     }
     match &arr.shape {
         None => result.errors.push(format!(
@@ -963,6 +979,7 @@ fn walk<B: Backend>(
                             shape,
                             dimension_names,
                             attrs: attributes(&meta),
+                            fill_value: meta.get("fill_value").cloned(),
                         },
                     );
                 }

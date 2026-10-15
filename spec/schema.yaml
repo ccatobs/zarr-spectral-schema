@@ -228,7 +228,9 @@ levels:
         inline: false
         arrays:
           # data_5d: raw spectrometer counts; axis order C,D,R,A,S (group attr).
-          data_5d:          { dtype: int32,   ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true }
+          # CHAI FITS stores counts as uint32 through BZERO = 2^31. The fill value
+          # is a saturated counter (u32::MAX), never a valid reading.
+          data_5d:          { dtype: uint32,  ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true, fill_value: 4294967295 }
           # Coordinate arrays (1D [S]); dtype split per the L0 writer's match.
           mjd:              { dtype: float64, ndim: 1, dims: [subscan], units: d, required: true }
           exptime:          { dtype: float32, ndim: 1, dims: [subscan], units: s, required: true }
@@ -273,7 +275,7 @@ levels:
         placement: scan_or_band
         inline: false
         arrays:
-          data_5d:          { dtype: int32,   ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true }
+          data_5d:          { dtype: uint32,  ndim: 5, dims: [channel, dump, receiver, array, subscan], units: ct, required: true, fill_value: 4294967295 }
           mjd:              { dtype: float64, ndim: 1, dims: [subscan], units: d, required: true }
           exptime:          { dtype: float32, ndim: 1, dims: [subscan], units: s, required: true }
           elevation:        { dtype: float32, ndim: 1, dims: [subscan], units: rad, required: true }
@@ -472,8 +474,8 @@ markers:
 
 # Bit table of the L1 `flags` array (uint16): key = const identifier, value =
 # bit index → `pub const NAME: u16 = 1 << bit` (Python: an int of the same
-# value). A datum is good when flags == 0. Bits 0-1 are set by calibrate, bits
-# 2-7 downstream; bits 8-15 are reserved. Bit 5 is ELEVATION_LOW, as calibrate
+# value). A datum is good when flags == 0. Calibrate sets bits 0, 1 and 8, bits
+# 2-7 are set downstream; bits 9-15 are reserved. Bit 5 is ELEVATION_LOW, as calibrate
 # (cal-core/src/flags.rs) and YODA (io/flags.py) write it.
 flag_bits:
   BAD_CHANNEL: 0      # calibrate: bad channel (hot <= cold, t_rec out of range)
@@ -484,6 +486,7 @@ flag_bits:
   ELEVATION_LOW: 5    # reduction: low elevation
   ML_FLAGGED: 6       # reduction: flagged by a machine-learning model
   MANUAL: 7           # reduction: flagged by hand
+  LOW_TRANSMISSION: 8 # calibrate: channel transmission below the min_transmission option (saturated atmospheric line)
 
 # Validator-only spec data (generates NO Rust const): for each canonical
 # attribute, the ordered list of source FITS keywords it may be resolved from,
