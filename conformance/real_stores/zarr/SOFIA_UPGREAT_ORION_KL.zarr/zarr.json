@@ -2,7 +2,7 @@
   "zarr_format": 3,
   "node_type": "group",
   "attributes": {
-    "fits_folder": "/home/buchbend/git/orgs/ccatobs/chai-software/calibrate_parity_tests/data/SOFIA_UPGREAT_ORION_KL",
+    "fits_folder": "chai-software/calibrate_parity_tests/data/SOFIA_UPGREAT_ORION_KL",
     "telescope": "SOFIA",
     "date_obs": "2018-12-18T06:11:45",
     "observer": "RobertSlawa",

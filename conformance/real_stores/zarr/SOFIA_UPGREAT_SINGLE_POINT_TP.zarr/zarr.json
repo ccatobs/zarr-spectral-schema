@@ -2,7 +2,7 @@
   "zarr_format": 3,
   "node_type": "group",
   "attributes": {
-    "fits_folder": "/home/buchbend/git/orgs/ccatobs/chai-software/calibrate_parity_tests/data/SOFIA_UPGREAT_SINGLE_POINT_TP",
+    "fits_folder": "chai-software/calibrate_parity_tests/data/SOFIA_UPGREAT_SINGLE_POINT_TP",
     "telescope": "SOFIA",
     "date_obs": "2016-11-10T07:58:53",
     "observer": "Monika",

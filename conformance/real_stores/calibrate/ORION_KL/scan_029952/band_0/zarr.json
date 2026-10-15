@@ -129,9 +129,9 @@
       "clip_counts": 0.01,
       "physics": "KalibrateCompat"
     },
-    "processing_timestamp": "2026-10-15T12:14:23Z",
+    "processing_timestamp": "2026-10-15T13:12:57Z",
     "atm_table_info": {
-      "path": "/home/buchbend/git/orgs/ccatobs/chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm",
+      "path": "chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm",
       "checksum": "e671796e2de84dc5"
     },
     "cal_engine_commit": "5bf7c7bdf5abbe1645871ec6c03c584f05ccd6fb",
