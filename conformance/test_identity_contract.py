@@ -4,12 +4,12 @@ The spec gains an additive pixel/source identity + provenance surface: L0 scan
 attrs `frontend` (string), `pixels_per_array` (list-of-lists `array`), and
 `raw_attrs` (`object`); `frontend` promoted at L1 from a band attr to a
 scan-or-band attr; and a validator-only `precedence_aliases` block documenting
-`pixel_offset: { from: [PIXOFFX, RXDX] }`. All fields are `required: false` — no
-on-disk version bump — so the contract is proven additive:
+`pixel_offset: { from: [PIXOFFX, RXDX] }`. #13 added the fields as
+`required: false`; L0 3 (#19) made the L0 identity attrs required:
 
   * a post-#6 store carrying the new fields validates green (and the fields land
     at the declared placement);
-  * a pre-#6 store WITHOUT the new fields still validates green;
+  * a pre-#6 store WITHOUT the identity attrs is rejected, naming each one;
   * wrong-typed values are rejected — `raw_attrs` as a string, and the legacy
     `pixels_per_array` HashMap/dict form (which `type: array` deliberately
     refuses, so the non-deterministic dict representation cannot be lifted).
@@ -29,8 +29,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -43,7 +43,9 @@ def stores(tmp_path_factory) -> Path:
     # Wrong-typed negatives. The raw_attrs bad value is `42` (no "object"
     # substring) so the assertion can only pass if the validator names the
     # expected type, not because the value text happened to contain it.
-    generate.emit_l0(out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42})
+    generate.emit_l0(
+        out / "l0_bad_raw_attrs.zarr", scan_attr_overrides={"raw_attrs": 42}
+    )
     generate.emit_l0(
         out / "l0_bad_pixels.zarr",
         scan_attr_overrides={"pixels_per_array": {"HFA": ["P1", "P2"]}},
@@ -73,17 +75,15 @@ def test_post6_l0_carries_identity_attrs_at_scan_group(stores):
     assert isinstance(scan["raw_attrs"], dict)
 
 
-# ── additive: a pre-#6 store (no new fields) still validates green ──────────────
+# ── L0 3 (#19): the identity attrs are required ────────────────────────────────
 
 
-def test_pre6_l0_validates_green(stores):
-    result = zss.check(stores / "l0_pre6.zarr")
-    assert result.ok, result.errors
-    view = zss._store.read_store(stores / "l0_pre6.zarr")  # type: ignore[attr-defined]
-    scan = view.group_attrs["scan_000001"]
-    assert "frontend" not in scan
-    assert "pixels_per_array" not in scan
-    assert "raw_attrs" not in scan
+def test_pre6_l0_without_identity_attrs_is_rejected(stores):
+    errors = zss.validate(stores / "l0_pre6.zarr")
+    for name in sorted(generate._IDENTITY_L0_ATTRS):
+        assert (
+            f"[L0] required attribute '{name}' is missing at 'scan_000001'" in errors
+        ), errors
 
 
 # ── wrong-typed values are rejected ────────────────────────────────────────────
@@ -93,7 +93,9 @@ def test_raw_attrs_must_be_object(stores):
     # Assert the type phrase (not just "object", which would match the value
     # text) so this proves a type-error rejection, not merely "an error names it".
     errors = zss.validate(stores / "l0_bad_raw_attrs.zarr")
-    assert any("raw_attrs" in e and "must be of type 'object'" in e for e in errors), errors
+    assert any("raw_attrs" in e and "must be of type 'object'" in e for e in errors), (
+        errors
+    )
 
 
 def test_pixels_per_array_dict_form_is_rejected(stores):
@@ -102,7 +104,9 @@ def test_pixels_per_array_dict_form_is_rejected(stores):
     # Assert the type phrase — "array" alone is a substring of the attribute
     # name pixels_per_array, so it would pass vacuously.
     errors = zss.validate(stores / "l0_bad_pixels.zarr")
-    assert any("pixels_per_array" in e and "must be of type 'array'" in e for e in errors), errors
+    assert any(
+        "pixels_per_array" in e and "must be of type 'array'" in e for e in errors
+    ), errors
 
 
 # ── L1: frontend promoted to scan-or-band placement ────────────────────────────

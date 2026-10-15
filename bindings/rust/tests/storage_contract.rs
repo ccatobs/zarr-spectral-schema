@@ -1,0 +1,257 @@
+//! Object storage and production volume (Rust binding) — #20.
+//!
+//! Validates the stores that `conformance/generate.py main()` emits (the
+//! `emit_storage_fixtures` set) and checks each verdict. The Python binding
+//! runs the same checks over the same stores (conformance/test_storage_contract.py).
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
+
+use zarr_spectral_schema as zss;
+
+/// Emit the fixtures once per test binary with the shared spec-driven generator.
+fn fixtures() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let out = std::env::temp_dir().join(format!("zss_rust_storage_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let status = Command::new("python3")
+            .arg(root.join("conformance/generate.py"))
+            .arg(&out)
+            .status()
+            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
+        assert!(status.success(), "generator failed");
+        out
+    })
+}
+
+fn errors(name: &str) -> Vec<String> {
+    zss::validate(&fixtures().join(name))
+}
+
+// ── 1. chunk independence ──────────────────────────────────────────────────
+
+#[test]
+fn store_with_non_default_chunk_layout_is_green() {
+    // One shard per pixel and subscan (C, D, 1, 1, 1) with inner chunks; the
+    // Python test asserts the layout on disk.
+    for name in ["l0_sharded.zarr", "l1_sharded.zarr"] {
+        let e = errors(name);
+        assert!(e.is_empty(), "{name}: expected green, got: {e:?}");
+    }
+}
+
+// ── 3. dtype choice ────────────────────────────────────────────────────────
+
+#[test]
+fn l1_float32_and_float64_spectra_are_green() {
+    for name in ["l1_float32.zarr", "l1_float64.zarr"] {
+        let e = errors(name);
+        assert!(e.is_empty(), "{name}: expected green, got: {e:?}");
+    }
+}
+
+#[test]
+fn l1_int16_spectra_is_rejected() {
+    let e = errors("l1_int16_spectra.zarr");
+    assert!(
+        e.iter()
+            .any(|m| m.contains("scan_000001/spectra") && m.contains("\"int16\"")),
+        "expected a dtype error on spectra, got: {e:?}"
+    );
+}
+
+#[test]
+fn l1_integer_keepbits_is_green() {
+    let e = errors("l1_keepbits.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}
+
+#[test]
+fn l1_non_integer_keepbits_is_rejected() {
+    let e = errors("l1_bad_keepbits.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("keepbits")
+            && m.contains("scan_000001/spectra")
+            && m.contains("\"integer\"")),
+        "expected a keepbits type error, got: {e:?}"
+    );
+}
+
+// ── 4. valid dump count ────────────────────────────────────────────────────
+
+#[test]
+fn valid_dump_count_dtype_and_dims_are_checked() {
+    for (name, rel) in [
+        (
+            "l0_bad_valid_dumps.zarr",
+            "scan_000001/source/n_valid_dumps",
+        ),
+        ("l1_bad_valid_dumps.zarr", "scan_000001/n_valid_dumps"),
+    ] {
+        let e = errors(name);
+        assert!(
+            e.iter().any(|m| m.contains(rel) && m.contains("dtype")),
+            "{name}: expected a dtype error, got: {e:?}"
+        );
+        assert!(
+            e.iter().any(|m| m.contains(rel) && m.contains("ndim")),
+            "{name}: expected an ndim error, got: {e:?}"
+        );
+    }
+}
+
+// ── 8. L0 counts: uint32 with a saturated-counter fill value ─────────────
+
+#[test]
+fn l0_int32_counts_are_a_dtype_error_naming_data_5d() {
+    let e = errors("l0_int32_counts.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("dtype")
+            && m.contains("uint32")),
+        "expected a dtype error on data_5d, got: {e:?}"
+    );
+}
+
+#[test]
+fn l0_wrong_fill_value_names_the_array_expected_and_found() {
+    let e = errors("l0_bad_fill_value.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("fill_value 0 != expected 4294967295")),
+        "expected a fill_value error, got: {e:?}"
+    );
+    assert!(e.iter().all(|m| m.starts_with("[L0] ")), "{e:?}");
+}
+
+#[test]
+fn l0_float_fill_value_is_a_mismatch() {
+    let e = errors("l0_float_fill_value.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("fill_value 4294967295.0 != expected 4294967295")),
+        "expected a fill_value error, got: {e:?}"
+    );
+}
+
+// ── 7. one writer per store: source_l0_store holds a URI reference ────────
+
+#[test]
+fn source_l0_store_is_a_uri_reference() {
+    // The same stores and verdicts as generate.SOURCE_L0_STORE_FIXTURES.
+    for (name, ok) in [
+        ("l1_l0_store_relative.zarr", true),
+        ("l1_l0_store_s3.zarr", true),
+        ("l1_l0_store_abs_path.zarr", false),
+        ("l1_l0_store_empty.zarr", false),
+        ("l1_l0_store_space.zarr", false),
+        ("l1_l0_store_backslash.zarr", false),
+        ("l1_l0_store_bad_escape.zarr", false),
+        ("l1_l0_store_non_ascii.zarr", false),
+    ] {
+        let e = errors(name);
+        if ok {
+            assert!(e.is_empty(), "{name}: expected green, got: {e:?}");
+        } else {
+            assert!(
+                e.iter()
+                    .any(|m| m.contains("source_l0_store") && m.contains("URI reference")),
+                "{name}: expected a URI reference error, got: {e:?}"
+            );
+        }
+    }
+}
+
+// ── 6. one local walk, one input grammar ───────────────────────────────────
+
+#[test]
+fn symlinked_scan_is_not_followed() {
+    // scan_000002 links to a scan without spectra; the walk does not enter it.
+    let store = fixtures().join("l1_symlinked_scan.zarr");
+    assert!(store.join("scan_000002").is_symlink());
+    let e = errors("l1_symlinked_scan.zarr");
+    assert!(e.is_empty(), "expected green, got: {e:?}");
+}
+
+#[test]
+fn local_path_with_double_colon_is_that_path() {
+    let e = errors("a::b/miss_array.zarr");
+    assert_eq!(e, ["[L1] required array 'scan_000001/spectra' is missing"]);
+}
+
+#[test]
+fn unlistable_local_group_is_an_error() {
+    use std::os::unix::fs::PermissionsExt;
+    // l1_bad_skydiff.zarr has three errors when every node is readable.
+    let skydiff = fixtures().join("l1_bad_skydiff.zarr/scan_000001/skydiff");
+    let mode = |m| std::fs::Permissions::from_mode(m);
+    std::fs::set_permissions(&skydiff, mode(0o311)).unwrap(); // no read: cannot list
+    let e = errors("l1_bad_skydiff.zarr");
+    std::fs::set_permissions(&skydiff, mode(0o755)).unwrap();
+    assert_eq!(e, ["[L1] 'scan_000001/skydiff/': cannot list"]);
+}
+
+#[cfg(not(feature = "s3"))]
+#[test]
+fn url_without_the_s3_feature_is_an_explicit_error() {
+    let e = zss::validate(Path::new("s3://zss/l1_single.zarr"));
+    assert_eq!(e, ["s3://zss/l1_single.zarr: s3:// needs the `s3` feature"]);
+}
+
+// ── 9. one FITS header per pixel; gamma in counts per second per kelvin ──
+
+#[test]
+fn l0_headers_per_pixel_are_green() {
+    // l0_sharded has R = A = S = 2: one cell per pixel and subscan.
+    assert!(errors("l0_sharded.zarr").is_empty());
+}
+
+#[test]
+fn l0_headers_without_the_pixel_axes_are_rejected() {
+    for (name, finding) in [
+        ("l0_headers_1d.zarr", "ndim 1 != expected 3"),
+        ("l0_headers_array_subscan.zarr", "ndim 2 != expected 3"),
+    ] {
+        let e = errors(name);
+        for array in ["raw_fits_headers", "frontend_backends"] {
+            let rel = format!("scan_000001/source/{array}");
+            assert!(
+                e.iter().any(|m| m.contains(&rel) && m.contains(finding)),
+                "{name}: expected an ndim error on {array}, got: {e:?}"
+            );
+            assert!(
+                e.iter()
+                    .any(|m| m.contains(&rel) && m.contains("dimension_names")),
+                "{name}: expected a dimension_names error on {array}, got: {e:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn l0_headers_with_a_wrong_pixel_axis_length_are_rejected() {
+    for (name, dim) in [
+        ("l0_headers_receiver_mismatch.zarr", "receiver"),
+        ("l0_headers_array_mismatch.zarr", "array"),
+    ] {
+        let e = errors(name);
+        assert!(
+            e.iter().any(|m| m.contains(&format!("dimension '{dim}'"))
+                && m.contains("2 in [source/frontend_backends")),
+            "{name}: expected a dimension length error, got: {e:?}"
+        );
+    }
+}
+
+#[test]
+fn l1_gamma_in_counts_per_kelvin_is_a_units_error() {
+    let e = errors("l1_gamma_old_unit.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/gamma")
+            && m.contains("units \"ct/K\" != expected \"ct/(K s)\"")),
+        "expected a units error, got: {e:?}"
+    );
+}

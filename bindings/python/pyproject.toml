@@ -12,13 +12,26 @@ license = { text = "MIT" }
 dependencies = [
     "pyyaml>=6.0",
     "jsonschema>=4.0",
+    # Opens a local path or a URL; the validator reads zarr.json objects only.
+    "fsspec>=2023.1",
 ]
 
 [project.optional-dependencies]
+# s3:// URLs (fsspec's S3 implementation).
+s3 = ["s3fs>=2023.1"]
 # zarr is needed only to EMIT reference stores (conformance generator); the
-# validator reads zarr.json directly and needs no zarr dependency.
-emit = ["zarr>=3.0", "numpy>=1.24"]
-dev = ["pytest>=7.0", "ruff>=0.4", "zarr>=3.0", "numpy>=1.24"]
+# validator reads zarr.json directly and needs no zarr dependency. moto serves
+# the emitted stores from an in-process S3 endpoint (conformance/s3_server.py)
+# for the object-storage tests of both bindings.
+emit = ["zarr>=3.0", "numpy>=1.24", "moto[server]>=5.0", "s3fs>=2023.1"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+    "zarr>=3.0",
+    "numpy>=1.24",
+    "moto[server]>=5.0",
+    "s3fs>=2023.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/zarr_spectral_schema"]

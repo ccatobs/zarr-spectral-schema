@@ -1,0 +1,20 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "fits_folder": "chai-software/calibrate_parity_tests/data/SOFIA_UPGREAT_ORION_KL",
+    "telescope": "SOFIA",
+    "date_obs": "2018-12-18T06:11:45",
+    "observer": "RobertSlawa",
+    "store_version": "3",
+    "zarr_fits_version": "0.2.0",
+    "l0_schema_version": 3,
+    "created_by": "zarr_fits_rs",
+    "profile_name": "sofia_upgreat",
+    "profile_version": 3,
+    "observatory": "SOFIA",
+    "site_latitude_deg": null,
+    "site_longitude_deg": null,
+    "site_altitude_m": null
+  }
+}

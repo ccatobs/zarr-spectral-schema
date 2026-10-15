@@ -1,0 +1,148 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "band_index": 1,
+    "line": "NH3(100-001)L",
+    "rest_freq_hz": 572498200000.0,
+    "arrays": [
+      "4G1"
+    ],
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "frontend": "4G1",
+    "raw_attrs": {
+      "fits_version": "2.12",
+      "pixel_offset_method": "direct",
+      "substitutions": {
+        "mjd": "computed_from_date_obs",
+        "tsky": "keyword"
+      },
+      "rotating_terms": {
+        "1": {
+          "posangle": 180.0,
+          "anglediff": 0.9318,
+          "cosydel": "J2000"
+        },
+        "2": {
+          "posangle": 180.0,
+          "anglediff": 0.9318,
+          "cosydel": "J2000"
+        }
+      },
+      "static_geometry": {
+        "4G1_PX00_S": {
+          "rxdx": 1.5885305385,
+          "rxdy": -7.3273484586,
+          "refrxdx": 2.0229,
+          "refrxdy": -2.6341,
+          "signrxdx": -1.0,
+          "signrxdy": 1.0,
+          "pixoffx": -0.358104524737538,
+          "pixoffy": 4.69966847683485
+        }
+      }
+    },
+    "pwv_mm": 0.015695374673529872,
+    "qa": {
+      "mean_t_sys": 349.46395111398346,
+      "median_t_sys": 347.3663670337137,
+      "pwv_mm": 0.015695374673529872,
+      "pwv_valid": true,
+      "pwv_at_grid_bound": false,
+      "pwv_reference_pixels": [
+        [
+          0,
+          0
+        ]
+      ],
+      "pwv_fallback_pixels": [],
+      "n_bad_channels": 4,
+      "n_channels": 16384,
+      "n_flagged_spectra": 4,
+      "fraction_flagged": 0.000244140625
+    },
+    "specsys": "TOPOCENT",
+    "veldef": "NONE",
+    "vlsr_source": 0.0,
+    "vlsr_source_frame": "NONE",
+    "ref_channel_base": 1,
+    "coord_frame": "NONE",
+    "equinox": null,
+    "projection": "NONE",
+    "offset_convention": "NONE",
+    "temperature_scale": "TA*",
+    "eta_fss": 0.95,
+    "eta_mb": null,
+    "gain_el_correction": 1.0,
+    "sideband_mode": "NONE",
+    "image_sideband_fraction": 0.5,
+    "cal_hash": "10b6dff7b5ef44cc",
+    "source_l0_store": "../../zarr/SOFIA_UPGREAT_ORION_KL.zarr",
+    "source_l0_scans": {
+      "source_scan": 29952,
+      "band_index": 1,
+      "source_on_subscans": [
+        1
+      ],
+      "source_off_subscans": [
+        0
+      ],
+      "cal_scan": 29951,
+      "cal_modes": [
+        "COL",
+        "HOT"
+      ]
+    },
+    "cal_config": {
+      "obs_mode": "TotalPower",
+      "pwv_source": "FitGridRefine",
+      "pwv_initial_guess": 1.0,
+      "pwv_grid_min": 0.001,
+      "pwv_grid_max": 10.0,
+      "pwv_grid_steps": 100,
+      "pwv_per_pixel": true,
+      "clip_tsys": 200.0,
+      "clip_counts": 0.01,
+      "eta_mb": 1.0,
+      "gain_el_correction": 1.0,
+      "physics": "KalibrateCompat",
+      "dbs_adhesive": false,
+      "gain_interpolate": 0,
+      "skydiff": 0,
+      "skychopdiff": false,
+      "min_transmission": 0.001
+    },
+    "cal_params": {
+      "foeff": 0.95,
+      "gain_image": 0.5,
+      "clip_tsys": 200.0,
+      "clip_counts": 0.01,
+      "physics": "KalibrateCompat"
+    },
+    "processing_timestamp": "2026-10-15T13:12:58Z",
+    "atm_table_info": {
+      "path": "chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm",
+      "checksum": "e671796e2de84dc5"
+    },
+    "cal_engine_commit": "5bf7c7bdf5abbe1645871ec6c03c584f05ccd6fb",
+    "cal_engine_version": "0.2.0",
+    "processing_steps": {
+      "gain_correction": false,
+      "gain_interpolate_level": 0,
+      "gain_skip_reason": null,
+      "linked_pwv": false,
+      "skydiff": false,
+      "skydiff_depth": 0,
+      "pwv_per_pixel": true,
+      "dbs_adhesive": false,
+      "obs_mode": "TotalPower",
+      "cal_strategy": "totalpower",
+      "ref_strategy": "nearest_off"
+    },
+    "l1_complete": true
+  }
+}

@@ -18,8 +18,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 sys.path.insert(0, str(_ROOT / "conformance"))
 
-import generate  # noqa: E402
-import zarr_spectral_schema as zss  # noqa: E402
+import generate
+import zarr_spectral_schema as zss
 
 
 @pytest.fixture(scope="module")
@@ -37,11 +37,11 @@ def stores(tmp_path_factory) -> Path:
 def test_constants_derived_from_spec():
     # Loaded from the spec — not hand-typed — and matching the Rust binding.
     assert zss.DATA_5D == "data_5d"
-    assert zss.L0_SCHEMA_VERSION == "2"
+    assert zss.L0_SCHEMA_VERSION == "3"
     # Expanded vocabulary (#3): groups, L1 version, marker, list consts.
     assert zss.SOURCE_GROUP == "source"
     assert zss.CALIBRATION_GROUP == "calibration"
-    assert zss.L1_SCHEMA_VERSION == "1.3"  # const name ≠ UPPER(attr cal_schema_version)
+    assert zss.L1_SCHEMA_VERSION == "2.0"  # const name ≠ UPPER(attr cal_schema_version)
     assert zss.TSKY_L0 == "tsky"  # const override
     assert zss.L1_COMPLETE_ATTR == "l1_complete"  # marker
     assert zss.SOURCE_MODES == ("ON", "OFF", "OTF-ON", "OTF-OFF")  # list const

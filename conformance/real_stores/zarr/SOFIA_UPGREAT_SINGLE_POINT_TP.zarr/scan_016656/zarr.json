@@ -1,0 +1,85 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "line": "CII_L",
+    "rest_freq_hz": 1900536900000.0,
+    "frontend": "LFA",
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "raw_attrs": {
+      "fits_version": "2.10",
+      "pixel_offset_method": "reconstructed",
+      "substitutions": {
+        "mjd": "computed_from_date_obs",
+        "tsky": "keyword"
+      },
+      "rotating_terms": {
+        "2": {
+          "posangle": 160.9,
+          "anglediff": 0.2975,
+          "cosydel": "J2000"
+        },
+        "3": {
+          "posangle": 160.9,
+          "anglediff": 0.2975,
+          "cosydel": "J2000"
+        }
+      },
+      "static_geometry": {
+        "LFAV_PX00_S": {
+          "rxdx": 0.376719247893665,
+          "rxdy": -0.797996686398409,
+          "refrxdx": 1.6,
+          "refrxdy": -2.2603,
+          "signrxdx": -1.0,
+          "signrxdy": 1.0
+        }
+      }
+    },
+    "alti_end": "43003.0",
+    "alti_sta": "43003.0",
+    "aor_id": "NONE",
+    "aot_id": "singlepoint_totalpower.sh_-f_inpar_singlepoint_total_power_OMC_COFF&",
+    "backend": "LFAV_PX00_S",
+    "datasrc": "ASTRO",
+    "deploy": "DAOF",
+    "flight_leg": "8",
+    "gps_alt": "13773.4548",
+    "headstat": "ORIGINAL",
+    "instcfg": "L1L_PX00 MPIfR_1.4THz_Solid- LFAV_PX00 MPIfR_LFA_Solid-Sta",
+    "instrume": "GREAT",
+    "lat_end": "23.6262",
+    "lat_sta": "23.6506",
+    "lon_end": "-133.47",
+    "lon_sta": "-133.457",
+    "mccsmode": "great_standard",
+    "mission_id": "2016-11-10_GR_F348",
+    "obs_id": "2016-11-10_GR_F348_LFAV_PX00_S_016656_002",
+    "operator": "Bernie",
+    "plan_id": "NONE",
+    "pressalt": "13262.1252",
+    "procstat": "LEVEL_1",
+    "spectel1": "GRE_L2",
+    "spectel2": "NONE",
+    "tamb_sofi": "242.3",
+    "tracerr": "true",
+    "tracmode": "OFF",
+    "wvz_end": "0.0",
+    "wvz_sta": "0.0",
+    "za_end": "53.5035",
+    "za_start": "54.0228",
+    "scan_number": 16656,
+    "source": "OMC_COFF-C",
+    "instmode": "CAL",
+    "date_obs": "2016-11-10T07:58:53",
+    "telescope": "SOFIA",
+    "observer": "Monika",
+    "velocity_source_kms": 0.0,
+    "lloadsn": 16654,
+    "l0_complete": true
+  }
+}

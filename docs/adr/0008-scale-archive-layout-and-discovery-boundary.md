@@ -127,3 +127,45 @@ No change to the Slice-1 tracer. Four constraints carry into later slices:
   chunk-addressable, partial reads over object storage are native, so
   "catalog query → group paths → partial S3 read" needs no special machinery in
   the contract.
+
+## Amendment 1 (2026-10-14): one writer per store
+
+Status: proposed in ccatobs/zarr-spectral-schema#20 (object storage and
+production volume); the maintainer approves it with the epic PR of #21.
+
+### Context
+
+- YODA writes its `reduce/` groups into the L1 store of calibrate, so two
+  programs write one store.
+- Object storage has no atomic rename and no lock. A second writer can race the
+  completeness marker of the producer, and the consolidated metadata of a
+  finished store goes stale when another program adds a group.
+- A rerun of the producer rewrites its store. It deletes or orphans the groups
+  of the consumer.
+- `source_l0_store` held a relative POSIX path, computed by calibrate from two
+  local paths; it fell back to an absolute path.
+
+### Decision
+
+1. One producer writes a store: zarr-fits writes an L0 store, calibrate writes an
+   L1 store.
+2. A consumer writes no group into the store of a producer. A consumer writes its
+   output to a store of its own and opens its inputs read only.
+3. A link from one store to another is an RFC 3986 URI reference: an absolute URI
+   (`s3://bucket/x.zarr`), or a relative reference resolved against the URI of
+   the linking store, its root taken as a directory (`../../zarr/x.zarr`). An
+   absolute POSIX path is not a valid link. A relative reference survives copying
+   the linked stores together (site-to-data-center replication); `file:///` would
+   tie the link to one host.
+
+### Consequences
+
+- The spec states the rule, and `source_l0_store` carries
+  `format: uri-reference`. Both validators reject an empty value, a character
+  outside RFC 3986 and an absolute path.
+- YODA moves its reduction output to a work store: ccatobs/yoda#50 (YODA reads
+  complete data).
+- The calibrate fallback to an absolute L0 path becomes an error:
+  ccatobs/kalibrate#101 (producers write the contract) handles it.
+- The producer is the only program that writes the completeness markers and the
+  consolidated metadata of a store, so both stay consistent with the units.

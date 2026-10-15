@@ -6,6 +6,10 @@
 //! so consts and validator cannot diverge, and the two bindings implement one
 //! interpretation that cannot drift.
 //!
+//! The store is first read into the same normalized view the Python reader
+//! builds (root attrs, group attrs and arrays keyed by store-relative path), so
+//! both interpreters walk the same shape.
+//!
 //! Three checks:
 //!
 //! * **Level detection** (Slice 4, #5) — a store is L0 *or* L1, detected by which
@@ -16,6 +20,15 @@
 //!   attrs, per-scan attrs, per-band attrs (multi-frontend), the scan-or-band
 //!   arrays/attrs, the L0 `source`/`calibration` sub-groups, and the diagnostic
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
+//!   The spec's `one_of` (exactly one of these groups per target), `equals`
+//!   (attr value constraint), `format` (`uri-reference`), `enum` (value set),
+//!   `sentinel` (not-applicable value), `prefix` (array family), dtype sets,
+//!   `fill_value` and array `attrs` are interpreted the same way. Each array's `dimension_names`
+//!   and `units` attr are checked against its `dims`/`units`; arrays at one
+//!   target agree on the length of each shared dimension; a multi-frontend scan
+//!   group holds no scan-or-band attr. Every structure finding starts with
+//!   `[<level>] `; version and level-detection errors do not (calibrate splits
+//!   on this prefix, kalibrate#82).
 //! * **Version negotiation** (Slice 3, #4) — each producer-owned on-disk version
 //!   is range-checked against the spec's supported window (`min_supported` ..
 //!   `value`): below the floor or a newer *major* is an error; a newer *minor* is
@@ -27,7 +40,7 @@
 //! [`ValidationResult`] with warnings.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -49,8 +62,10 @@ struct VersionSpec {
 #[derive(Deserialize)]
 struct Level {
     /// Root attribute whose presence marks a store as this level.
+    detect: String,
+    /// Groups of which each placement target holds exactly one.
     #[serde(default)]
-    detect: Option<String>,
+    one_of: Vec<String>,
     #[serde(default)]
     root_attrs: BTreeMap<String, AttrSpec>,
     #[serde(default)]
@@ -67,30 +82,82 @@ struct Level {
 struct AttrSpec {
     r#type: String,
     required: bool,
+    /// Value constraint: the attr must hold exactly this value.
+    #[serde(default)]
+    equals: Option<Value>,
+    /// String format constraint (`uri-reference`).
+    #[serde(default)]
+    format: Option<String>,
+    /// The attr may hold the not-applicable sentinel instead of a value.
+    #[serde(default)]
+    sentinel: bool,
+    /// Value set: the attr holds one of these values.
+    #[serde(default)]
+    r#enum: Option<Vec<Value>>,
 }
 
 #[derive(Deserialize)]
 struct Group {
     /// `scan` | `scan_or_band` — where this group's arrays live relative to a scan.
-    #[serde(default)]
-    placement: Option<String>,
+    placement: String,
     /// true ⇒ arrays sit directly in the target dir; false ⇒ under `<target>/<name>/`.
-    #[serde(default)]
     inline: bool,
     arrays: BTreeMap<String, ArraySpec>,
 }
 
 #[derive(Deserialize)]
 struct ArraySpec {
-    dtype: String,
+    dtype: Dtype,
     ndim: usize,
+    /// Ordered axis names, checked against the zarr v3 `dimension_names`.
+    dims: Vec<String>,
+    /// FITS unit string, checked against the array's `units` attr.
+    #[serde(default)]
+    units: Option<String>,
     required: bool,
+    /// Fill value the array must declare in its Zarr metadata.
+    #[serde(default)]
+    fill_value: Option<serde_json::Number>,
+    /// Attributes of the array itself (e.g. `keepbits`).
+    #[serde(default)]
+    attrs: BTreeMap<String, AttrSpec>,
+    /// Array family: matches every array whose name starts with this prefix.
+    #[serde(default)]
+    prefix: Option<String>,
+}
+
+/// One dtype name, or a set of names the array may take (#20).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Dtype {
+    One(String),
+    Set(Vec<String>),
+}
+
+impl Dtype {
+    fn allows(&self, dtype: &str) -> bool {
+        match self {
+            Dtype::One(d) => d == dtype,
+            Dtype::Set(set) => set.iter().any(|d| d == dtype),
+        }
+    }
+}
+
+impl std::fmt::Display for Dtype {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dtype::One(d) => write!(f, "{d:?}"),
+            Dtype::Set(set) => write!(f, "{set:?}"),
+        }
+    }
 }
 
 /// Outcome of validating a store: hard `errors` and advisory `warnings`.
 #[derive(Debug, Default)]
 pub struct ValidationResult {
+    /// Structure findings, version errors and level-detection errors.
     pub errors: Vec<String>,
+    /// Advisory findings, for example a newer minor version.
     pub warnings: Vec<String>,
 }
 
@@ -101,57 +168,84 @@ impl ValidationResult {
     }
 }
 
+/// The normalized store view (parity with the Python `StoreView`): every node
+/// keyed by its store-relative path, e.g. `scan_000001/source/data_5d`.
+#[derive(Default)]
+struct StoreView {
+    root_attrs: Map<String, Value>,
+    groups: BTreeMap<String, Map<String, Value>>,
+    arrays: BTreeMap<String, ArrayMeta>,
+    /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
+    errors: Vec<String>,
+}
+
+/// One array node of the view (parity with the Python `ArrayView`).
+struct ArrayMeta {
+    dtype: String,
+    /// List of non-negative integers, or `None` when the metadata holds anything else.
+    shape: Option<Vec<u64>>,
+    /// zarr v3 `dimension_names` as parsed (`None` when absent or null).
+    dimension_names: Option<Value>,
+    attrs: Map<String, Value>,
+    /// zarr v3 `fill_value` as parsed (`None` when absent).
+    fill_value: Option<Value>,
+}
+
 fn load_spec() -> Spec {
     // The synced copy that build.rs also reads; include_str! is relative to this file.
-    serde_yaml::from_str(include_str!("../spec/schema.yaml")).expect("parse synced spec/schema.yaml")
+    serde_yaml::from_str(include_str!("../spec/schema.yaml"))
+        .expect("parse synced spec/schema.yaml")
 }
 
 /// Validate a Zarr v3 store against the spec. Returns errors; empty = conformant.
 ///
 /// Back-compat surface. Use [`check`] to also surface newer-minor warnings.
+/// `store` is a local path, or an `s3://` URL with the `s3` feature, as for
+/// [`check`]. The errors are those of [`check`]: a structure finding starts with
+/// `[L0] ` or `[L1] `; a version error and a level-detection error do not.
 pub fn validate(store: &Path) -> Vec<String> {
     check(store).errors
 }
 
 /// Validate a Zarr v3 store against the spec, returning errors and warnings.
+///
+/// `store` is a local path or, with the `s3` feature, a URL
+/// (`Path::new("s3://bucket/store.zarr")`). An S3 store takes its endpoint,
+/// region and credentials from the standard `AWS_*` environment variables; its
+/// check blocks on a runtime of its own, so do not call it from inside a tokio
+/// runtime. A local check reads with `std::fs` and needs no runtime.
+///
+/// The check reads `zarr.json` objects only, never a chunk. It accepts the
+/// current major version of each level (L0 3, L1 2.0); a store below
+/// `min_supported` gets one version error, without a prefix. Structure
+/// findings follow when the store lacks fields of the current version; a
+/// consumer stops on the version error.
+///
+/// Returns a [`ValidationResult`]. `errors` holds structure findings (prefix
+/// `[L0] ` or `[L1] `), version errors and level-detection errors (no prefix).
+/// `warnings` holds a newer minor version. A metadata file that does not parse is
+/// an error. An unreadable root group gives one error and nothing else.
 pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
     let mut result = ValidationResult::default();
-
-    let root = match read_json(&store.join("zarr.json")) {
-        Some(v) if v.get("node_type").and_then(|n| n.as_str()) == Some("group") => v,
-        _ => {
-            result.errors.push(format!(
-                "{}: not a Zarr v3 group (missing/!group root zarr.json)",
-                store.display()
-            ));
+    let view = match read_store(store) {
+        Ok(view) => view,
+        Err(e) => {
+            result.errors.push(e);
             return result;
         }
     };
-    let empty = Map::new();
-    let root_attrs = root
-        .get("attributes")
-        .and_then(|a| a.as_object())
-        .unwrap_or(&empty);
 
     // ── level detection ────────────────────────────────────────────────────
     // A store is exactly one level, marked by which `detect` root attr it carries.
     let applicable: Vec<(&String, &Level)> = spec
         .levels
         .iter()
-        .filter(|(_, lvl)| {
-            lvl.detect
-                .as_deref()
-                .is_some_and(|d| root_attrs.contains_key(d))
-        })
+        .filter(|(_, lvl)| view.root_attrs.contains_key(&lvl.detect))
         .collect();
 
     if applicable.is_empty() {
-        let mut detects: Vec<&str> = spec
-            .levels
-            .values()
-            .filter_map(|l| l.detect.as_deref())
-            .collect();
+        let mut detects: Vec<&str> = spec.levels.values().map(|l| l.detect.as_str()).collect();
         detects.sort_unstable();
         result.errors.push(format!(
             "store declares no known level: none of the detect attributes {detects:?} \
@@ -164,32 +258,49 @@ pub fn check(store: &Path) -> ValidationResult {
     // carries l0_schema_version, an L1 store cal_schema_version — checking the
     // absent one would spuriously fail every single-level store.
     let applicable_levels: Vec<&str> = applicable.iter().map(|(name, _)| name.as_str()).collect();
-    negotiate_versions(&spec, root_attrs, &applicable_levels, &mut result);
+    negotiate_versions(&spec, &view.root_attrs, &applicable_levels, &mut result);
 
     for (level_name, level) in &applicable {
-        check_level(store, level_name, level, root_attrs, &mut result);
+        check_level(&view, level_name, level, &mut result);
     }
 
     result
 }
 
-/// Walk one applicable level's structural contract against the store.
-fn check_level(
-    store: &Path,
-    level_name: &str,
-    level: &Level,
-    root_attrs: &Map<String, Value>,
-    result: &mut ValidationResult,
-) {
+/// Walk one applicable level's structural contract against the store view.
+fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut ValidationResult) {
+    // Metadata that did not parse is a structure finding of this level.
+    result
+        .errors
+        .extend(view.errors.iter().map(|e| format!("[{level_name}] {e}")));
+
     // Root attrs declared for this level.
-    check_attrs(root_attrs, &level.root_attrs, "root", level_name, result);
+    check_attrs(
+        &view.root_attrs,
+        &level.root_attrs,
+        "root",
+        level_name,
+        result,
+    );
 
     let needs_scans = !level.scan_attrs.is_empty()
         || !level.band_attrs.is_empty()
         || !level.scan_or_band_attrs.is_empty()
         || !level.groups.is_empty();
 
-    let scan_groups = child_groups(store, is_scan);
+    let root_children = view
+        .groups
+        .keys()
+        .chain(view.arrays.keys())
+        .filter(|p| !p.contains('/'));
+    for name in root_children {
+        if name.starts_with("scan_") && !is_scan(name) {
+            result.errors.push(format!(
+                "[{level_name}] root child '{name}' does not match the scan pattern {SCAN_PATTERN}"
+            ));
+        }
+    }
+    let scan_groups: Vec<&String> = view.groups.keys().filter(|p| is_scan(p)).collect();
     if needs_scans && scan_groups.is_empty() {
         result.errors.push(format!(
             "[{level_name}] no scan_<NNNNNN> groups found at the store root"
@@ -197,113 +308,277 @@ fn check_level(
         return;
     }
 
-    for sg in &scan_groups {
-        let scan_dir = store.join(sg);
-        let bands = child_groups(&scan_dir, is_band);
-        let multi = !bands.is_empty();
+    for sg in scan_groups {
+        let bands: Vec<String> = view
+            .groups
+            .keys()
+            .filter(|p| p.strip_prefix(&format!("{sg}/")).is_some_and(is_band))
+            .cloned()
+            .collect();
 
         // Per-scan-group attrs always checked at the scan group itself.
-        let scan_attrs = group_attrs(&scan_dir);
-        check_attrs(&scan_attrs, &level.scan_attrs, sg, level_name, result);
+        check_attrs(&view.groups[sg], &level.scan_attrs, sg, level_name, result);
 
-        // Multi-frontend: per-band attrs on each band group.
-        if multi {
-            for b in &bands {
-                let band_attrs = group_attrs(&scan_dir.join(b));
-                let where_ = format!("{sg}/{b}");
-                check_attrs(&band_attrs, &level.band_attrs, &where_, level_name, result);
-            }
+        // Multi-frontend: per-band attrs on each band group, and no scan-or-band
+        // attr on the scan group (it belongs on each band).
+        for b in &bands {
+            check_attrs(&view.groups[b], &level.band_attrs, b, level_name, result);
         }
-
-        // scan_or_band resolves to the scan group (single) or each band (multi).
-        // Targets carry the relative path (for messages) and the on-disk dir.
-        let targets: Vec<(String, std::path::PathBuf)> = if multi {
-            bands
-                .iter()
-                .map(|b| (format!("{sg}/{b}"), scan_dir.join(b)))
-                .collect()
-        } else {
-            vec![(sg.clone(), scan_dir.clone())]
-        };
-
-        for (trel, tdir) in &targets {
-            let target_attrs = group_attrs(tdir);
-            check_attrs(
-                &target_attrs,
-                &level.scan_or_band_attrs,
-                trel,
-                level_name,
-                result,
-            );
-            for (gname, group) in &level.groups {
-                if group.placement.as_deref() == Some("scan_or_band") {
-                    check_group_arrays(tdir, trel, gname, group, level_name, result);
+        if !bands.is_empty() {
+            for name in level.scan_or_band_attrs.keys() {
+                if view.groups[sg].contains_key(name) {
+                    result.errors.push(format!(
+                        "[{level_name}] attribute '{name}' at '{sg}' belongs on each band \
+                         of a multi-frontend scan, not on the scan group"
+                    ));
                 }
             }
         }
 
-        // `placement: scan` groups (L0 source/calibration) live under the scan
-        // group regardless of multi-frontend.
-        for (gname, group) in &level.groups {
-            if group.placement.as_deref() == Some("scan") {
-                check_group_arrays(&scan_dir, sg, gname, group, level_name, result);
+        // `scan` placement resolves to the scan group; `scan_or_band` to the
+        // scan group (single-frontend) or each band (multi-frontend).
+        let sob = if bands.is_empty() {
+            vec![sg.clone()]
+        } else {
+            bands
+        };
+        for t in &sob {
+            check_attrs(
+                &view.groups[t],
+                &level.scan_or_band_attrs,
+                t,
+                level_name,
+                result,
+            );
+        }
+        // (path, dims, shape) of each array checked, per target.
+        let mut seen: BTreeMap<String, Vec<Seen>> = BTreeMap::new();
+        for (placement, targets) in [("scan", vec![sg.clone()]), ("scan_or_band", sob)] {
+            let placed: Vec<(&String, &Group)> = level
+                .groups
+                .iter()
+                .filter(|(_, g)| g.placement == placement)
+                .collect();
+            let one_of: Vec<&String> = level
+                .one_of
+                .iter()
+                .filter(|n| placed.iter().any(|(p, _)| p == n))
+                .collect();
+            for t in &targets {
+                let present: Vec<&String> = one_of
+                    .iter()
+                    .copied()
+                    .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
+                    .collect();
+                if !one_of.is_empty() && present.len() != 1 {
+                    result.errors.push(format!(
+                        "[{level_name}] '{t}' must hold exactly one of {one_of:?}, found {present:?}"
+                    ));
+                }
+                for (gname, group) in &placed {
+                    if one_of.contains(gname) && !present.contains(gname) {
+                        continue;
+                    }
+                    let seen = seen.entry(t.clone()).or_default();
+                    check_group_arrays(view, t, gname, group, level_name, result, seen);
+                }
             }
+        }
+        for (t, arrays) in &seen {
+            check_shared_dims(t, arrays, level_name, result);
         }
     }
 }
 
-/// Check one group's arrays under `base_dir` (store-relative path `base_rel`).
+/// One checked array: (store path, declared dims, on-disk shape).
+type Seen = (String, Vec<String>, Vec<u64>);
+
+/// Arrays at one target that share an axis name agree on its length.
+fn check_shared_dims(
+    target: &str,
+    arrays: &[Seen],
+    level_name: &str,
+    result: &mut ValidationResult,
+) {
+    let mut lengths: BTreeMap<&str, BTreeMap<u64, Vec<&str>>> = BTreeMap::new();
+    for (rel, dims, shape) in arrays {
+        for (dim, n) in dims.iter().zip(shape) {
+            lengths
+                .entry(dim)
+                .or_default()
+                .entry(*n)
+                .or_default()
+                .push(&rel[target.len() + 1..]);
+        }
+    }
+    for (dim, by_len) in &lengths {
+        if by_len.len() > 1 {
+            let parts: Vec<String> = by_len
+                .iter()
+                .map(|(n, names)| {
+                    let mut names = names.clone();
+                    names.sort_unstable();
+                    format!("{n} in [{}]", names.join(", "))
+                })
+                .collect();
+            result.errors.push(format!(
+                "[{level_name}] arrays at '{target}' disagree on the length of dimension '{dim}': {}",
+                parts.join("; ")
+            ));
+        }
+    }
+}
+
+/// Check one group's arrays under `base`.
 ///
 /// `inline` groups place arrays directly in `base`; otherwise they sit under
 /// `base/<group_name>/`. Required arrays must exist (dtype + ndim checked);
-/// optional arrays are checked only when present.
+/// optional arrays are checked only when present. An array family (`prefix`)
+/// checks every array whose name starts with the prefix.
 fn check_group_arrays(
-    base_dir: &Path,
-    base_rel: &str,
+    view: &StoreView,
+    base: &str,
     group_name: &str,
     group: &Group,
     level_name: &str,
     result: &mut ValidationResult,
+    seen: &mut Vec<Seen>,
 ) {
-    let (prefix_dir, prefix_rel) = if group.inline {
-        (base_dir.to_path_buf(), base_rel.to_string())
+    let prefix = if group.inline {
+        base.to_string()
     } else {
-        (base_dir.join(group_name), format!("{base_rel}/{group_name}"))
+        format!("{base}/{group_name}")
     };
     for (array_name, aspec) in &group.arrays {
-        let rel = format!("{prefix_rel}/{array_name}");
-        let meta = read_json(&prefix_dir.join(array_name).join("zarr.json"));
-        let Some(meta) = meta else {
-            if aspec.required {
-                result
-                    .errors
-                    .push(format!("[{level_name}] required array '{rel}' is missing"));
-            }
+        let Some(family) = &aspec.prefix else {
+            check_array(
+                view,
+                &format!("{prefix}/{array_name}"),
+                aspec,
+                level_name,
+                result,
+                seen,
+            );
             continue;
         };
-        let dtype = meta.get("data_type").and_then(|d| d.as_str()).unwrap_or("");
-        let ndim = meta
-            .get("shape")
-            .and_then(|s| s.as_array())
-            .map_or(0, |a| a.len());
-        if dtype != aspec.dtype {
+        let start = format!("{prefix}/{family}");
+        let mut members: Vec<&String> = view
+            .arrays
+            .keys()
+            .chain(view.groups.keys())
+            .filter(|r| r.starts_with(&start) && !r[prefix.len() + 1..].contains('/'))
+            .collect();
+        members.sort();
+        if members.is_empty() && aspec.required {
             result.errors.push(format!(
-                "[{level_name}] array '{rel}' dtype {dtype:?} != expected {:?}",
-                aspec.dtype
+                "[{level_name}] required array family '{start}*' is missing"
             ));
         }
-        if ndim != aspec.ndim {
-            result.errors.push(format!(
-                "[{level_name}] array '{rel}' ndim {ndim} != expected {}",
-                aspec.ndim
-            ));
+        for rel in members {
+            check_array(view, rel, aspec, level_name, result, seen);
         }
     }
 }
 
+/// Check one array path: node type, presence (if required), dtype, ndim,
+/// `fill_value` (when the spec declares one),
+/// `dimension_names` against the spec's `dims`, the `units` attr and the
+/// array's own `attrs`.
+fn check_array(
+    view: &StoreView,
+    rel: &str,
+    aspec: &ArraySpec,
+    level_name: &str,
+    result: &mut ValidationResult,
+    seen: &mut Vec<Seen>,
+) {
+    if view.groups.contains_key(rel) {
+        result.errors.push(format!(
+            "[{level_name}] '{rel}' is a group, expected an array"
+        ));
+        return;
+    }
+    let Some(arr) = view.arrays.get(rel) else {
+        if aspec.required {
+            result
+                .errors
+                .push(format!("[{level_name}] required array '{rel}' is missing"));
+        }
+        return;
+    };
+    if !aspec.dtype.allows(&arr.dtype) {
+        result.errors.push(format!(
+            "[{level_name}] array '{rel}' dtype {:?} != expected {}",
+            arr.dtype, aspec.dtype
+        ));
+    }
+    if let Some(want) = &aspec.fill_value {
+        let want = Value::Number(want.clone());
+        // Exact: serde_json numbers differ by kind, so 4294967295.0 is not 4294967295.
+        if arr.fill_value.as_ref() != Some(&want) {
+            let got = arr.fill_value.as_ref().map_or("null".to_string(), Value::to_string);
+            result.errors.push(format!(
+                "[{level_name}] array '{rel}' fill_value {got} != expected {want}"
+            ));
+        }
+    }
+    match &arr.shape {
+        None => result.errors.push(format!(
+            "[{level_name}] array '{rel}' shape is not a list of non-negative integers"
+        )),
+        Some(shape) if shape.len() != aspec.ndim => result.errors.push(format!(
+            "[{level_name}] array '{rel}' ndim {} != expected {}",
+            shape.len(),
+            aspec.ndim
+        )),
+        Some(shape) if shape.len() == aspec.dims.len() => {
+            seen.push((rel.to_string(), aspec.dims.clone(), shape.clone()));
+        }
+        Some(_) => {}
+    }
+    let dims: Vec<Value> = aspec.dims.iter().cloned().map(Value::String).collect();
+    match &arr.dimension_names {
+        None => result.errors.push(format!(
+            "[{level_name}] array '{rel}' has no dimension_names (expected {})",
+            json_list(&dims)
+        )),
+        Some(Value::Array(names)) if *names == dims => {}
+        Some(other) => result.errors.push(format!(
+            "[{level_name}] array '{rel}' dimension_names {} != expected {}",
+            other
+                .as_array()
+                .map_or_else(|| other.to_string(), |a| json_list(a)),
+            json_list(&dims)
+        )),
+    }
+    if let Some(units) = &aspec.units {
+        let expected = Value::String(units.clone());
+        match arr.attrs.get("units") {
+            None => result.errors.push(format!(
+                "[{level_name}] array '{rel}' has no units attr (expected {expected})"
+            )),
+            Some(got) if *got != expected => result.errors.push(format!(
+                "[{level_name}] array '{rel}' units {got} != expected {expected}"
+            )),
+            Some(_) => {}
+        }
+    }
+    check_attrs(&arr.attrs, &aspec.attrs, rel, level_name, result);
+}
+
+/// Render a JSON list as Python's `json.dumps` does (`["a", "b"]`), so both
+/// bindings word a finding the same way.
+fn json_list(items: &[Value]) -> String {
+    let parts: Vec<String> = items.iter().map(Value::to_string).collect();
+    format!("[{}]", parts.join(", "))
+}
+
 /// Check declared attrs at one placement location (`where_` is the store path
 /// used in messages). Required attrs must be present and (if present)
-/// type-checked; optional attrs are type-checked only when present.
+/// type-checked; optional attrs are type-checked only when present. An attr with
+/// `sentinel: true` may hold the not-applicable sentinel instead. An `enum`
+/// value set, an `equals` value constraint and a `format` are checked after the
+/// type.
 fn check_attrs(
     attrs: &Map<String, Value>,
     declared: &BTreeMap<String, AttrSpec>,
@@ -320,13 +595,40 @@ fn check_attrs(
             }
             continue;
         };
+        if aspec.sentinel && *value == sentinel(&aspec.r#type) {
+            continue;
+        }
         if !type_matches(&aspec.r#type, value) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must be of type \
                  {:?}, got {value}",
                 aspec.r#type
             ));
+        } else if let Some(set) = aspec.r#enum.as_ref().filter(|s| !s.contains(value)) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be one of {}, got {value}",
+                json_list(set)
+            ));
+        } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must equal {equals}, got {value}"
+            ));
+        } else if aspec.format.as_deref() == Some("uri-reference")
+            && !value.as_str().is_some_and(is_uri_reference)
+        {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be a URI reference \
+                 (RFC 3986) and not an absolute path, got {value}"
+            ));
         }
+    }
+}
+
+/// The not-applicable sentinel of an attr type: "NONE" or JSON null.
+fn sentinel(attr_type: &str) -> Value {
+    match attr_type {
+        "string" => Value::String("NONE".into()),
+        _ => Value::Null,
     }
 }
 
@@ -363,9 +665,9 @@ fn negotiate_versions(
             continue;
         }
         let Some(value) = root_attrs.get(attr_name) else {
-            result
-                .errors
-                .push(format!("root attribute '{attr_name}' is required but missing"));
+            result.errors.push(format!(
+                "root attribute '{attr_name}' is required but missing"
+            ));
             continue;
         };
         let disk = match vspec.on_disk.as_str() {
@@ -398,18 +700,19 @@ fn negotiate_versions(
 /// version (no minor) only exercises major.
 fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut ValidationResult) {
     let Some(store) = parse_version(disk) else {
-        result
-            .errors
-            .push(format!("root attribute '{attr_name}': cannot parse version {disk:?}"));
+        result.errors.push(format!(
+            "root attribute '{attr_name}': cannot parse version {disk:?}"
+        ));
         return;
     };
-    let (Some(current), Some(floor)) =
-        (parse_version(&vspec.value), parse_version(&vspec.min_supported))
-    else {
+    let (Some(current), Some(floor)) = (
+        parse_version(&vspec.value),
+        parse_version(&vspec.min_supported),
+    ) else {
         // The meta-schema guarantees these parse; defensive.
-        result
-            .errors
-            .push(format!("root attribute '{attr_name}': spec version range is malformed"));
+        result.errors.push(format!(
+            "root attribute '{attr_name}': spec version range is malformed"
+        ));
         return;
     };
 
@@ -432,61 +735,338 @@ fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut Vali
 }
 
 /// Parse `major[.minor]` (or a bare integer) into a `(major, minor)` tuple.
+///
+/// ASCII digits only (`parse::<u64>` alone would take a `+` sign), the same
+/// grammar as the meta-schema and the Python binding.
 fn parse_version(s: &str) -> Option<(u64, u64)> {
-    let mut parts = s.trim().split('.');
-    let major = parts.next()?.parse::<u64>().ok()?;
-    let minor = match parts.next() {
-        Some(m) => m.parse::<u64>().ok()?,
-        None => 0,
-    };
-    Some((major, minor))
+    let digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let (major, minor) = s.split_once('.').unwrap_or((s, "0"));
+    if !(digits(major) && digits(minor)) {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
-/// Names of immediate child groups of `dir` whose name passes `pred`, sorted.
-///
-/// A child is a "group" iff it holds a `zarr.json` with `node_type: group`; we
-/// only enumerate by directory name and let the attr read confirm the node type
-/// where it matters. Sorted to match the Python reader's `sorted(...)` order.
-fn child_groups(dir: &Path, pred: impl Fn(&str) -> bool) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if pred(&name) && entry.path().join("zarr.json").is_file() {
-            out.push(name);
+/// An RFC 3986 URI reference (ASCII; a `%` starts a two-hex-digit escape), not
+/// empty and not an absolute path: a leading `/` names a file on one host only.
+/// Parity with the Python `_URI_REFERENCE_RE`.
+fn is_uri_reference(value: &str) -> bool {
+    let allowed = |c: u8| c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c);
+    let mut rest = value.as_bytes();
+    if rest.is_empty() || rest[0] == b'/' {
+        return false;
+    }
+    while let Some((&c, tail)) = rest.split_first() {
+        if c == b'%' {
+            if !(tail.len() >= 2 && tail[0].is_ascii_hexdigit() && tail[1].is_ascii_hexdigit()) {
+                return false;
+            }
+            rest = &tail[2..];
+        } else if allowed(c) {
+            rest = tail;
+        } else {
+            return false;
         }
     }
-    out.sort();
-    out
+    true
 }
 
-/// Read a group node's `attributes` map (empty if absent / not a group).
-fn group_attrs(dir: &Path) -> Map<String, Value> {
-    read_json(&dir.join("zarr.json"))
-        .and_then(|v| v.get("attributes").and_then(|a| a.as_object()).cloned())
-        .unwrap_or_default()
-}
+/// The scan-group name pattern, quoted in errors (parity with the Python `_SCAN_PATTERN`).
+const SCAN_PATTERN: &str = "^scan_[0-9]{6,}$";
 
-/// `scan_<6 digits>` (writer pads to 6).
+/// `scan_<6+ ASCII digits>` (writer pads to 6).
 fn is_scan(name: &str) -> bool {
-    name.len() == 11
-        && name.starts_with("scan_")
-        && name[5..].bytes().all(|b| b.is_ascii_digit())
+    name.len() >= 11 && name.starts_with("scan_") && name[5..].bytes().all(|b| b.is_ascii_digit())
 }
 
 /// `band_<digits>` (writer: `band_{index}`, base-0, no zero-pad).
 fn is_band(name: &str) -> bool {
-    name.len() > 5
-        && name.starts_with("band_")
-        && name[5..].bytes().all(|b| b.is_ascii_digit())
+    name.len() > 5 && name.starts_with("band_") && name[5..].bytes().all(|b| b.is_ascii_digit())
 }
 
-fn read_json(path: &Path) -> Option<Value> {
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+// ── store reader (the per-language seam; parity with `_store.py`) ──────────
+//
+// Parse rule (both bindings, stated in the spec): metadata is strict JSON. A
+// non-finite number (`NaN`, `Infinity`, `-Infinity`) is its own error; any other
+// unparseable `zarr.json` is a malformed-metadata error. The node is then left
+// out of the view.
+//
+// Object storage (#20). One input grammar in both bindings: an argument that
+// starts with `scheme://` is a URL, read through `object_store` (feature `s3`),
+// and its path is percent-decoded. Anything else is a local path, read with
+// `std::fs`. Both backends serve one walk: it reads only `zarr.json` objects,
+// lists the children of each group node and stops at an array node, so it
+// never lists or opens a chunk key. A directory without a `zarr.json` is not a
+// node, and the local walk does not follow a symlinked directory. An I/O
+// failure is an error of its own, never a gap: a failed listing is
+// `'<rel>/': cannot list`, a failed read of a `zarr.json` is
+// `'<rel>': cannot read metadata`.
+
+/// Where the walk reads a store: list the child directories of a node, read
+/// the `zarr.json` of a node.
+trait Backend {
+    /// A node: a directory path, or an object-store key prefix.
+    type Loc;
+    /// The child directories of `dir` with their names, sorted by name.
+    fn children(&self, dir: &Self::Loc) -> Result<Vec<(String, Self::Loc)>, ()>;
+    /// The `zarr.json` of `dir`: `Ok(None)` when absent, `Err` when unreadable.
+    fn zarr_json(&self, dir: &Self::Loc) -> Result<Option<Vec<u8>>, ()>;
+}
+
+/// A local directory tree, read with `std::fs`.
+struct Fs;
+
+impl Backend for Fs {
+    type Loc = PathBuf;
+
+    fn children(&self, dir: &PathBuf) -> Result<Vec<(String, PathBuf)>, ()> {
+        let mut children = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(drop)? {
+            let entry = entry.map_err(drop)?;
+            // file_type() does not follow a symlink: a symlinked directory is skipped.
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                children.push((name, entry.path()));
+            }
+        }
+        children.sort();
+        Ok(children)
+    }
+
+    fn zarr_json(&self, dir: &PathBuf) -> Result<Option<Vec<u8>>, ()> {
+        match std::fs::read(dir.join("zarr.json")) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+/// An object store behind a URL, with a runtime to block on its futures.
+#[cfg(feature = "s3")]
+struct Obj {
+    rt: tokio::runtime::Runtime,
+    store: Box<dyn object_store::ObjectStore>,
+}
+
+#[cfg(feature = "s3")]
+impl Obj {
+    /// Open a URL; return the backend and the key of the store root.
+    fn open(url: &str) -> Result<(Self, object_store::path::Path), String> {
+        let parsed = url::Url::parse(url).map_err(|e| format!("{url}: {e}"))?;
+        // Endpoint, region and credentials come from AWS_*; a variable that is
+        // not UTF-8 is skipped.
+        let aws_env = std::env::vars_os()
+            .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+            .filter(|(k, _)| k.starts_with("AWS_"));
+        let (store, root) =
+            object_store::parse_url_opts(&parsed, aws_env).map_err(|e| format!("{url}: {e}"))?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("{url}: {e}"))?;
+        Ok((Self { rt, store }, root))
+    }
+}
+
+#[cfg(feature = "s3")]
+impl Backend for Obj {
+    type Loc = object_store::path::Path;
+
+    fn children(&self, dir: &Self::Loc) -> Result<Vec<(String, Self::Loc)>, ()> {
+        let list = self
+            .rt
+            .block_on(self.store.list_with_delimiter(Some(dir)))
+            .map_err(drop)?;
+        let mut children: Vec<(String, Self::Loc)> = list
+            .common_prefixes
+            .into_iter()
+            .filter_map(|p| Some((p.filename()?.to_string(), p.clone())))
+            .collect();
+        children.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(children)
+    }
+
+    fn zarr_json(&self, dir: &Self::Loc) -> Result<Option<Vec<u8>>, ()> {
+        use object_store::ObjectStoreExt;
+        let key = dir.clone().join("zarr.json");
+        let get = async { self.store.get(&key).await?.bytes().await };
+        match self.rt.block_on(get) {
+            Ok(bytes) => Ok(Some(bytes.to_vec())),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+fn not_group(store: &Path) -> String {
+    format!(
+        "{}: not a Zarr v3 group (missing/!group root zarr.json)",
+        store.display()
+    )
+}
+
+/// `scheme://…` (scheme: an ASCII letter, then letters, digits, `+`, `.`, `-`).
+/// Parity with the Python `_URL_RE`.
+fn is_url(s: &str) -> bool {
+    s.split_once("://").is_some_and(|(scheme, _)| {
+        scheme
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic())
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+.-".contains(&b))
+    })
+}
+
+/// Walk a Zarr v3 store and normalize every node keyed by relative path.
+/// Fails only when the root is not a readable Zarr v3 group.
+fn read_store(store: &Path) -> Result<StoreView, String> {
+    match store.to_str().filter(|s| is_url(s)) {
+        None => read_with(&Fs, store.to_path_buf(), store),
+        #[cfg(feature = "s3")]
+        Some(url) => {
+            let (backend, root) = Obj::open(url)?;
+            read_with(&backend, root, store)
+        }
+        #[cfg(not(feature = "s3"))]
+        Some(_) => Err(format!("{}: s3:// needs the `s3` feature", store.display())),
+    }
+}
+
+fn read_with<B: Backend>(backend: &B, root: B::Loc, store: &Path) -> Result<StoreView, String> {
+    let meta = read_meta(backend, &root, "zarr.json")?.ok_or_else(|| not_group(store))?;
+    if meta.get("node_type").and_then(Value::as_str) != Some("group") {
+        return Err(not_group(store));
+    }
+    let mut view = StoreView {
+        root_attrs: attributes(&meta),
+        ..StoreView::default()
+    };
+    walk(backend, &root, "", &mut view)?; // a root that cannot be listed fails the read
+    Ok(view)
+}
+
+/// Record each child node of the group at `dir` (`rel` in the store); recurse
+/// into child groups. `Err` when `dir` cannot be listed; a child group that
+/// cannot be listed is an error in `view.errors`.
+///
+/// ponytail: one request at a time; fetch siblings concurrently if a large
+/// store on object storage makes the walk slow.
+fn walk<B: Backend>(
+    backend: &B,
+    dir: &B::Loc,
+    rel: &str,
+    view: &mut StoreView,
+) -> Result<(), String> {
+    let children = backend
+        .children(dir)
+        .map_err(|()| format!("'{rel}/': cannot list"))?;
+    for (name, child) in children {
+        let rel = if rel.is_empty() {
+            name
+        } else {
+            format!("{rel}/{name}")
+        };
+        match read_meta(backend, &child, &format!("{rel}/zarr.json")) {
+            Err(e) => view.errors.push(e),
+            Ok(None) => {}
+            Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
+                Some("group") => {
+                    view.groups.insert(rel.clone(), attributes(&meta));
+                    if let Err(e) = walk(backend, &child, &rel, view) {
+                        view.errors.push(e);
+                    }
+                }
+                Some("array") => {
+                    let shape = meta
+                        .get("shape")
+                        .and_then(Value::as_array)
+                        .and_then(|s| s.iter().map(Value::as_u64).collect());
+                    let dimension_names = meta
+                        .get("dimension_names")
+                        .filter(|v| !v.is_null())
+                        .cloned();
+                    view.arrays.insert(
+                        rel,
+                        ArrayMeta {
+                            dtype: dtype_name(meta.get("data_type")),
+                            shape,
+                            dimension_names,
+                            attrs: attributes(&meta),
+                            fill_value: meta.get("fill_value").cloned(),
+                        },
+                    );
+                }
+                _ => {}
+            },
+        }
+    }
+    Ok(())
+}
+
+/// Parse the `zarr.json` of `dir`: `Ok(None)` when absent, `Err` naming `rel`
+/// when it cannot be read or does not parse to a JSON object.
+fn read_meta<B: Backend>(
+    backend: &B,
+    dir: &B::Loc,
+    rel: &str,
+) -> Result<Option<Map<String, Value>>, String> {
+    let text = match backend.zarr_json(dir) {
+        Ok(None) => return Ok(None),
+        Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
+        Err(()) => return Err(format!("'{rel}': cannot read metadata")),
+    };
+    match text.as_deref().map(serde_json::from_str::<Value>) {
+        Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
+        Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {
+            Err(format!("'{rel}': non-finite number in metadata"))
+        }
+        _ => Err(format!("'{rel}': malformed metadata (not valid JSON)")),
+    }
+}
+
+/// True when `text` holds a bare `NaN` or `Infinity` token outside a string —
+/// the non-JSON number literals that serde_json rejects and Python's json accepts.
+fn has_non_finite(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let (mut in_string, mut escaped) = (false, false);
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_string {
+            match (escaped, b) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_string = false,
+                _ => {}
+            }
+        } else if b == b'"' {
+            in_string = true;
+        } else if bytes[i..].starts_with(b"NaN") || bytes[i..].starts_with(b"Infinity") {
+            return true;
+        }
+    }
+    false
+}
+
+/// A node's `attributes` map (empty if absent or not an object).
+fn attributes(meta: &Map<String, Value>) -> Map<String, Value> {
+    meta.get("attributes")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Normalize a Zarr v3 `data_type` to its plain name: the string form, or the
+/// `name` of the object (extension) form; anything else has no name ("").
+fn dtype_name(data_type: Option<&Value>) -> String {
+    match data_type {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Object(o)) => o
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        _ => String::new(),
+    }
 }

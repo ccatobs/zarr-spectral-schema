@@ -41,6 +41,12 @@
       "propertyNames": { "$ref": "#/$defs/ident" },
       "additionalProperties": { "type": "string" }
     },
+    "flag_bits": {
+      "description": "Bit table of the L1 `flags` array: const identifier → bit index. Generates `pub const NAME: u16 = 1 << bit` (Python: an int of the same value).",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ident" },
+      "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 15 }
+    },
     "precedence_aliases": {
       "description": "Validator-only spec data (generates NO const): for each canonical attribute (the key), the ordered source-keyword precedence chain it may be resolved from. Documents resolution provenance; the generic validator does not enforce it.",
       "type": "object",
@@ -54,6 +60,11 @@
       "type": "string",
       "pattern": "^[A-Z][A-Z0-9_]*$"
     },
+    "version_value": {
+      "description": "An on-disk version: major or major.minor, ASCII digits only (the grammar both bindings parse).",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?$"
+    },
     "version": {
       "type": "object",
       "required": ["level", "on_disk", "value", "min_supported"],
@@ -64,8 +75,8 @@
           "description": "How the value is encoded in the store attribute.",
           "enum": ["integer", "string"]
         },
-        "value": { "type": "string" },
-        "min_supported": { "type": "string" },
+        "value": { "$ref": "#/$defs/version_value" },
+        "min_supported": { "$ref": "#/$defs/version_value" },
         "const": {
           "description": "Override the generated Rust const identifier (default UPPER(attr key)).",
           "$ref": "#/$defs/ident"
@@ -74,12 +85,19 @@
     },
     "level": {
       "type": "object",
-      "required": ["groups"],
+      "required": ["detect", "groups"],
       "additionalProperties": false,
       "properties": {
         "detect": {
           "description": "Root attribute whose presence marks a store as this level (e.g. l0_schema_version).",
           "type": "string"
+        },
+        "one_of": {
+          "description": "Groups of which each placement target holds exactly one. Only the present group's arrays are checked; both or neither is an error.",
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string" }
         },
         "root_attrs": { "$ref": "#/$defs/attrs" },
         "scan_attrs": { "$ref": "#/$defs/attrs" },
@@ -94,7 +112,7 @@
     },
     "group": {
       "type": "object",
-      "required": ["arrays"],
+      "required": ["placement", "inline", "arrays"],
       "additionalProperties": false,
       "properties": {
         "const": {
@@ -128,30 +146,85 @@
       "type": "object",
       "required": ["type", "required"],
       "additionalProperties": false,
+      "if": { "required": ["format"] },
+      "then": { "properties": { "type": { "const": "string" } } },
       "properties": {
         "type": {
           "description": "JSON value type the attribute is encoded as.",
           "enum": ["string", "integer", "number", "boolean", "array", "object"]
         },
-        "required": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "sentinel": {
+          "description": "The attr may hold the not-applicable sentinel instead of a value: \"NONE\" for a string, null for a number.",
+          "type": "boolean"
+        },
+        "equals": {
+          "description": "Value constraint: when present on disk, the attribute must hold exactly this value.",
+          "type": ["string", "integer", "number", "boolean"]
+        },
+        "format": {
+          "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty and never an absolute path.",
+          "enum": ["uri-reference"]
+        },
+        "enum": {
+          "description": "Value set: when present on disk, the attribute holds one of these values (or its not-applicable sentinel when `sentinel` is true).",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": ["string", "integer", "number"] }
+        }
       }
     },
     "array": {
       "type": "object",
-      "required": ["dtype", "ndim", "required"],
+      "required": ["dtype", "ndim", "dims", "required"],
       "additionalProperties": false,
       "properties": {
         "dtype": {
-          "description": "Zarr v3 data type name (core types + variable-length `string`).",
-          "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "bool", "string"]
+          "description": "Zarr v3 data type name (core types + variable-length `string`), or a set of names the array may take (e.g. [float64, float32]). Producers write the first name of a set by default.",
+          "oneOf": [
+            { "$ref": "#/$defs/dtype_name" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/dtype_name" }
+            }
+          ]
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
+        "dims": {
+          "description": "Ordered axis names (one per dimension). Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "units": {
+          "description": "FITS unit string as astropy parses it (\"\" = dimensionless). Producers write it as the array's `units` attr. Omitted for labels, indices, counts of items, strings and bitmasks.",
+          "type": "string"
+        },
+        "fill_value": {
+          "description": "The fill value the array declares in its Zarr metadata. A store whose array declares another one is an error. An integer; the store must hold the same integer, not a float.",
+          "type": "integer"
+        },
         "required": { "type": "boolean" },
+        "attrs": {
+          "description": "Attributes of the array itself (e.g. keepbits), checked like group attrs.",
+          "$ref": "#/$defs/attrs"
+        },
+        "prefix": {
+          "description": "Array family: the entry matches every array in the group whose name starts with this prefix (e.g. spectrum_ for spectrum_0, spectrum_1_3). `required` then means at least one member.",
+          "type": "string",
+          "minLength": 1
+        },
         "const": {
           "description": "Override the generated array const identifier (default UPPER(on-disk name)).",
           "$ref": "#/$defs/ident"
         }
       }
+    },
+    "dtype_name": {
+      "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "uint32", "bool", "string"]
     },
     "precedence_alias": {
       "description": "One canonical attribute's source-keyword precedence chain.",

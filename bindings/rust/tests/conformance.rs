@@ -45,7 +45,7 @@ fn emit_fixtures() -> PathBuf {
 #[test]
 fn constants_generated_from_spec() {
     assert_eq!(zss::DATA_5D, "data_5d");
-    assert_eq!(zss::L0_SCHEMA_VERSION, "2");
+    assert_eq!(zss::L0_SCHEMA_VERSION, "3");
 }
 
 // ── positive: each shape validates green ───────────────────────────────────
@@ -140,14 +140,6 @@ fn version_equal_is_green() {
 }
 
 #[test]
-fn version_older_minor_is_green() {
-    let f = emit_fixtures();
-    let r = zss::check(&f.join("ver_older.zarr"));
-    assert!(r.ok(), "expected green, got: {:?}", r.errors);
-    assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
-}
-
-#[test]
 fn version_newer_minor_warns_but_passes() {
     let f = emit_fixtures();
     let r = zss::check(&f.join("ver_newer_minor.zarr"));
@@ -155,7 +147,7 @@ fn version_newer_minor_warns_but_passes() {
     assert_eq!(r.warnings.len(), 1, "expected one warning, got: {:?}", r.warnings);
     let w = &r.warnings[0];
     assert!(
-        w.contains("cal_schema_version") && w.contains("1.9") && w.contains("1.3"),
+        w.contains("cal_schema_version") && w.contains("2.9") && w.contains("2.0"),
         "warning should name the axis and both versions, got: {w}"
     );
     // Back-compat: validate() returns errors only → empty for a warning-only store.
@@ -168,7 +160,7 @@ fn version_newer_major_errors() {
     let r = zss::check(&f.join("ver_newer_major.zarr"));
     assert!(!r.ok(), "newer-major must error");
     assert!(
-        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("2.0")),
+        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("3.0")),
         "expected newer-major error, got: {:?}",
         r.errors
     );
@@ -187,51 +179,20 @@ fn version_l0_integer_newer_major_errors() {
 }
 
 #[test]
-fn version_below_floor_errors() {
+fn version_below_floor_is_one_version_error() {
+    // min_supported names the oldest version whose stores pass the structural
+    // check; the fixtures are structurally current, so the version is the only error.
     let f = emit_fixtures();
-    let r = zss::check(&f.join("ver_below_floor.zarr"));
-    assert!(!r.ok(), "below-min_supported must error");
-    assert!(
-        r.errors.iter().any(|e| e.contains("cal_schema_version")),
-        "expected below-floor error, got: {:?}",
-        r.errors
-    );
-}
-
-// ── real writer-produced stores (skipped if the fixture is absent) ─────────
-//
-// The correctness gate: a real cal-io L1 store (not a spec-emitted synthetic)
-// must validate green — if the spec marked something required that the writer
-// only conditionally emits, this fails. Generate the fixtures with cal-io's
-// ignored generators and point PARITY_TEST_DIR at the output base:
-//   PARITY_TEST_DIR=<dir> cargo test -p cal-io --test generate_l1_test_store -- --ignored
-//   PARITY_TEST_DIR=<dir> cargo test -p cal-io --test generate_multi_frontend_l1_test_store -- --ignored
-
-/// Resolve `$PARITY_TEST_DIR/l1_test_data/<name>` if it exists.
-fn real_store(name: &str) -> Option<PathBuf> {
-    let dir = std::env::var("PARITY_TEST_DIR").ok()?;
-    let p = PathBuf::from(dir).join("l1_test_data").join(name);
-    p.exists().then_some(p)
-}
-
-#[test]
-fn real_single_frontend_store_is_green() {
-    let Some(real) = real_store("synthetic_l1.zarr") else {
-        eprintln!("skipping: real single-frontend fixture absent (set PARITY_TEST_DIR)");
-        return;
-    };
-    let r = zss::check(&real);
-    assert!(r.ok(), "real store must validate green, got errors: {:?}", r.errors);
-    assert!(r.errors.is_empty());
-}
-
-#[test]
-fn real_multi_frontend_store_is_green() {
-    let Some(real) = real_store("synthetic_l1_multi.zarr") else {
-        eprintln!("skipping: real multi-frontend fixture absent (set PARITY_TEST_DIR)");
-        return;
-    };
-    let r = zss::check(&real);
-    assert!(r.ok(), "real multi-frontend store must validate green, got errors: {:?}", r.errors);
-    assert!(r.errors.is_empty());
+    for (name, attr) in [
+        ("ver_below_floor.zarr", "cal_schema_version"),
+        ("ver_l0_below_floor.zarr", "l0_schema_version"),
+    ] {
+        let r = zss::check(&f.join(name));
+        assert_eq!(r.errors.len(), 1, "{name}: expected one error, got: {:?}", r.errors);
+        assert!(
+            r.errors[0].contains(attr) && r.errors[0].contains("minimum supported"),
+            "{name}: expected a below-floor error, got: {:?}",
+            r.errors
+        );
+    }
 }

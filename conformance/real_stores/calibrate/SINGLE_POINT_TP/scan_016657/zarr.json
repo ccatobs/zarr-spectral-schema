@@ -1,0 +1,208 @@
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "alti_end": "43004.0",
+    "alti_sta": "43000.0",
+    "aor_id": "NONE",
+    "aot_id": "singlepoint_totalpower.sh_-f_inpar_singlepoint_total_power_OMC_COFF&",
+    "backend": "LFAV_PX00_S",
+    "datasrc": "ASTRO",
+    "date_obs": "2016-11-10T07:59:22",
+    "deploy": "DAOF",
+    "flight_leg": "8",
+    "gps_alt": "13770.92496",
+    "headstat": "ORIGINAL",
+    "instcfg": "L1L_PX00 MPIfR_1.4THz_Solid- LFAV_PX00 MPIfR_LFA_Solid-Sta",
+    "instrume": "GREAT",
+    "lat_end": "23.5556",
+    "lat_sta": "23.5879",
+    "lon_end": "-133.51",
+    "lon_sta": "-133.492",
+    "mccsmode": "great_standard",
+    "mission_id": "2016-11-10_GR_F348",
+    "obs_id": "2016-11-10_GR_F348_LFAV_PX00_S_016657_001",
+    "operator": "Bernie",
+    "plan_id": "NONE",
+    "pressalt": "13261.2",
+    "procstat": "LEVEL_1",
+    "spectel1": "GRE_L2",
+    "spectel2": "NONE",
+    "tamb_sofi": "242.3",
+    "telescope": "SOFIA",
+    "tracerr": "false",
+    "tracmode": "OFFSET+INERTIAL",
+    "wvz_end": "0.0",
+    "wvz_sta": "0.0",
+    "za_end": "53.4569",
+    "za_start": "53.7219",
+    "mjd": 57702.33289351852,
+    "scan_number": 16657,
+    "source": "OMC_COFF-C",
+    "instmode": "TP",
+    "raw_instmode": "TP",
+    "cal_strategy": "totalpower",
+    "ref_strategy": "nearest_off",
+    "cal_scan_numbers": [
+      16656
+    ],
+    "lloadsn": [
+      16656,
+      16656
+    ],
+    "site_latitude_deg": null,
+    "site_longitude_deg": null,
+    "site_altitude_m": null,
+    "line": "CII_L",
+    "rest_freq_hz": 1900536900000.0,
+    "arrays": [
+      "LFAV"
+    ],
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "frontend": "LFA",
+    "raw_attrs": {
+      "fits_version": "2.10",
+      "pixel_offset_method": "reconstructed",
+      "substitutions": {
+        "mjd": "computed_from_date_obs",
+        "tsky": "keyword"
+      },
+      "rotating_terms": {
+        "1": {
+          "posangle": 160.9,
+          "anglediff": 0.2975,
+          "cosydel": "J2000"
+        },
+        "2": {
+          "posangle": 160.9,
+          "anglediff": 0.2191,
+          "cosydel": "J2000"
+        },
+        "3": {
+          "posangle": 160.9,
+          "anglediff": 0.2191,
+          "cosydel": "J2000"
+        },
+        "4": {
+          "posangle": 160.9,
+          "anglediff": 0.3001,
+          "cosydel": "J2000"
+        }
+      },
+      "static_geometry": {
+        "LFAV_PX00_S": {
+          "rxdx": 0.376719247893665,
+          "rxdy": -0.797996686398409,
+          "refrxdx": 1.6,
+          "refrxdy": -2.2603,
+          "signrxdx": -1.0,
+          "signrxdy": 1.0
+        }
+      }
+    },
+    "pwv_mm": 0.00987885944298577,
+    "qa": {
+      "mean_t_sys": 2202.536709960867,
+      "median_t_sys": 2183.293242317992,
+      "pwv_mm": 0.00987885944298577,
+      "pwv_valid": true,
+      "pwv_at_grid_bound": false,
+      "pwv_reference_pixels": [
+        [
+          0,
+          0
+        ]
+      ],
+      "pwv_fallback_pixels": [],
+      "n_bad_channels": 527,
+      "n_channels": 16384,
+      "n_flagged_spectra": 1054,
+      "fraction_flagged": 0.03216552734375
+    },
+    "specsys": "TOPOCENT",
+    "veldef": "NONE",
+    "vlsr_source": 0.0,
+    "vlsr_source_frame": "NONE",
+    "ref_channel_base": 1,
+    "coord_frame": "NONE",
+    "equinox": null,
+    "projection": "NONE",
+    "offset_convention": "NONE",
+    "temperature_scale": "TA*",
+    "eta_fss": 0.97,
+    "eta_mb": null,
+    "gain_el_correction": 1.0,
+    "sideband_mode": "NONE",
+    "image_sideband_fraction": 0.5,
+    "cal_hash": "b4f567a46488fb14",
+    "source_l0_store": "../../zarr/SOFIA_UPGREAT_SINGLE_POINT_TP.zarr",
+    "source_l0_scans": {
+      "source_scan": 16657,
+      "band_index": 0,
+      "source_on_subscans": [
+        1,
+        2
+      ],
+      "source_off_subscans": [
+        0,
+        3
+      ],
+      "cal_scan": 16656,
+      "cal_modes": [
+        "COL",
+        "HOT"
+      ]
+    },
+    "cal_config": {
+      "obs_mode": "Auto",
+      "pwv_source": "FitGridRefine",
+      "pwv_initial_guess": 1.0,
+      "pwv_grid_min": 0.001,
+      "pwv_grid_max": 10.0,
+      "pwv_grid_steps": 100,
+      "pwv_per_pixel": true,
+      "clip_tsys": 200.0,
+      "clip_counts": 0.01,
+      "eta_mb": 1.0,
+      "gain_el_correction": 1.0,
+      "physics": "KalibrateCompat",
+      "dbs_adhesive": false,
+      "gain_interpolate": 0,
+      "skydiff": 0,
+      "skychopdiff": false,
+      "min_transmission": 0.001
+    },
+    "cal_params": {
+      "foeff": 0.97,
+      "gain_image": 0.5,
+      "clip_tsys": 200.0,
+      "clip_counts": 0.01,
+      "physics": "KalibrateCompat"
+    },
+    "processing_timestamp": "2026-10-15T13:12:50Z",
+    "atm_table_info": {
+      "path": "chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm",
+      "checksum": "e671796e2de84dc5"
+    },
+    "cal_engine_commit": "5bf7c7bdf5abbe1645871ec6c03c584f05ccd6fb",
+    "cal_engine_version": "0.2.0",
+    "processing_steps": {
+      "gain_correction": false,
+      "gain_interpolate_level": 0,
+      "gain_skip_reason": null,
+      "linked_pwv": false,
+      "skydiff": false,
+      "skydiff_depth": 0,
+      "pwv_per_pixel": true,
+      "dbs_adhesive": false,
+      "obs_mode": "TotalPower",
+      "cal_strategy": "totalpower",
+      "ref_strategy": "nearest_off"
+    },
+    "l1_complete": true
+  }
+}
