@@ -25,7 +25,6 @@
     "frontend_backends": [
       "LFAV_PX00_S"
     ],
-    "fill_value_int32": -2147483648,
     "chunk_strategy": "(min(1024,C), D, R, A, 1) = (1024, 1, 1, 1, 1)"
   }
 }

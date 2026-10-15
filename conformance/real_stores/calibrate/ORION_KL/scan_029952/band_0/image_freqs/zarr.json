@@ -19,7 +19,7 @@
       "separator": "/"
     }
   },
-  "fill_value": 0.0,
+  "fill_value": "NaN",
   "codecs": [
     {
       "name": "sharding_indexed",
@@ -58,10 +58,14 @@
     }
   ],
   "attributes": {
+    "units": "Hz",
     "_zarrs": {
       "description": "This array was created with zarrs",
       "repository": "https://github.com/zarrs/zarrs",
       "version": "0.23.6"
     }
-  }
+  },
+  "dimension_names": [
+    "channel"
+  ]
 }

@@ -2,27 +2,6 @@
   "zarr_format": 3,
   "node_type": "group",
   "attributes": {
-    "scan_number": 16657,
-    "source": "OMC_COFF-C",
-    "instmode": "TP",
-    "raw_instmode": "TP",
-    "vlsr_source": 0.0,
-    "pwv_mm": 0.009619620052086999,
-    "eta_fss": 1.0,
-    "eta_mb": 1.0,
-    "gain_el_correction": 1.0,
-    "cal_strategy": "totalpower",
-    "ref_strategy": "nearest_off",
-    "arrays": [
-      "LFAV"
-    ],
-    "pixels_per_array": [
-      [
-        "PX00_S"
-      ]
-    ],
-    "cal_scan_numbers": [],
-    "lloadsn": [],
     "alti_end": "43004.0",
     "alti_sta": "43000.0",
     "aor_id": "NONE",
@@ -58,6 +37,33 @@
     "za_end": "53.4569",
     "za_start": "53.7219",
     "mjd": 57702.33289351852,
+    "scan_number": 16657,
+    "source": "OMC_COFF-C",
+    "instmode": "TP",
+    "raw_instmode": "TP",
+    "cal_strategy": "totalpower",
+    "ref_strategy": "nearest_off",
+    "cal_scan_numbers": [
+      16656
+    ],
+    "lloadsn": [
+      16656,
+      16656
+    ],
+    "site_latitude_deg": null,
+    "site_longitude_deg": null,
+    "site_altitude_m": null,
+    "line": "CII_L",
+    "rest_freq_hz": 1900536900000.0,
+    "arrays": [
+      "LFAV"
+    ],
+    "pixels_per_array": [
+      [
+        "PX00_S"
+      ]
+    ],
+    "frontend": "LFA",
     "raw_attrs": {
       "fits_version": "2.10",
       "pixel_offset_method": "reconstructed",
@@ -98,23 +104,45 @@
         }
       }
     },
-    "frontend": "LFA",
-    "line": "CII_L",
-    "rest_freq_hz": 1900536900000.0,
+    "pwv_mm": 0.00987885944298577,
     "qa": {
-      "mean_t_sys": 2201.9682214667487,
-      "median_t_sys": 2182.8980098432708,
-      "pwv_mm": 0.009619620052086999,
-      "pwv_valid": false,
+      "mean_t_sys": 2202.536709960867,
+      "median_t_sys": 2183.293242317992,
+      "pwv_mm": 0.00987885944298577,
+      "pwv_valid": true,
+      "pwv_at_grid_bound": false,
+      "pwv_reference_pixels": [
+        [
+          0,
+          0
+        ]
+      ],
+      "pwv_fallback_pixels": [],
       "n_bad_channels": 527,
       "n_channels": 16384,
       "n_flagged_spectra": 1054,
       "fraction_flagged": 0.03216552734375
     },
-    "cal_hash": "4c065723d5f91bcf",
+    "specsys": "TOPOCENT",
+    "veldef": "NONE",
+    "vlsr_source": 0.0,
+    "vlsr_source_frame": "NONE",
+    "ref_channel_base": 1,
+    "coord_frame": "NONE",
+    "equinox": null,
+    "projection": "NONE",
+    "offset_convention": "NONE",
+    "temperature_scale": "TA*",
+    "eta_fss": 0.97,
+    "eta_mb": null,
+    "gain_el_correction": 1.0,
+    "sideband_mode": "NONE",
+    "image_sideband_fraction": 0.5,
+    "cal_hash": "b4f567a46488fb14",
     "source_l0_store": "../../zarr/SOFIA_UPGREAT_SINGLE_POINT_TP.zarr",
     "source_l0_scans": {
       "source_scan": 16657,
+      "band_index": 0,
       "source_on_subscans": [
         1,
         2
@@ -136,30 +164,40 @@
       "pwv_grid_min": 0.001,
       "pwv_grid_max": 10.0,
       "pwv_grid_steps": 100,
-      "pwv_per_pixel": false,
+      "pwv_per_pixel": true,
       "clip_tsys": 200.0,
       "clip_counts": 0.01,
-      "eta_fss": 1.0,
       "eta_mb": 1.0,
       "gain_el_correction": 1.0,
-      "n_threads": null,
       "physics": "KalibrateCompat",
       "dbs_adhesive": false,
       "gain_interpolate": 0,
       "skydiff": 0,
-      "skychopdiff": false
+      "skychopdiff": false,
+      "min_transmission": 0.001
     },
-    "processing_timestamp": "2026-10-14T18:21:01Z",
+    "cal_params": {
+      "foeff": 0.97,
+      "gain_image": 0.5,
+      "clip_tsys": 200.0,
+      "clip_counts": 0.01,
+      "physics": "KalibrateCompat"
+    },
+    "processing_timestamp": "2026-10-15T12:14:15Z",
     "atm_table_info": {
-      "path": "/home/buchbend/git/orgs/ccatobs/chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm"
+      "path": "/home/buchbend/git/orgs/ccatobs/chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm",
+      "checksum": "e671796e2de84dc5"
     },
+    "cal_engine_commit": "5bf7c7bdf5abbe1645871ec6c03c584f05ccd6fb",
+    "cal_engine_version": "0.2.0",
     "processing_steps": {
       "gain_correction": false,
       "gain_interpolate_level": 0,
+      "gain_skip_reason": null,
       "linked_pwv": false,
       "skydiff": false,
       "skydiff_depth": 0,
-      "pwv_per_pixel": false,
+      "pwv_per_pixel": true,
       "dbs_adhesive": false,
       "obs_mode": "TotalPower",
       "cal_strategy": "totalpower",

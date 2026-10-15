@@ -29,10 +29,14 @@
     }
   ],
   "attributes": {
+    "units": "K",
     "_zarrs": {
       "description": "This array was created with zarrs",
       "repository": "https://github.com/zarrs/zarrs",
       "version": "0.23.6"
     }
-  }
+  },
+  "dimension_names": [
+    "subscan"
+  ]
 }

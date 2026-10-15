@@ -49,7 +49,7 @@
           {
             "name": "zstd",
             "configuration": {
-              "level": 3,
+              "level": 1,
               "checksum": false
             }
           }
@@ -70,10 +70,18 @@
     }
   ],
   "attributes": {
+    "units": "K",
     "_zarrs": {
       "description": "This array was created with zarrs",
       "repository": "https://github.com/zarrs/zarrs",
       "version": "0.23.6"
     }
-  }
+  },
+  "dimension_names": [
+    "channel",
+    "dump",
+    "receiver",
+    "array",
+    "subscan"
+  ]
 }
