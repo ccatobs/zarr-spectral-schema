@@ -254,8 +254,9 @@ levels:
           sobsmode:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
           # Per pixel [R,A,S], the shape of pixel_offset_lon: a CHAI FITS file holds
           # one pixel, so each record has its own header. A cell of frontend_backends
-          # holds the FITS FRONTEND value of that pixel's record (e.g. HFAV_PX00_S);
-          # a cell of raw_fits_headers holds its verbatim header (JSON). A cell with
+          # holds the record identifier zarr-fits takes from the FITS file name
+          # (e.g. HFAV_PX00_S), not the FRONTEND keyword (HFAV_PX00); a cell of
+          # raw_fits_headers holds its verbatim header (JSON). A cell with
           # no record (fewer pixels than R) holds the empty string.
           frontend_backends: { dtype: string, ndim: 3, dims: [receiver, array, subscan], required: true }
           raw_fits_headers: { dtype: string,  ndim: 3, dims: [receiver, array, subscan], required: true }
