@@ -114,3 +114,10 @@ satisfies.
 - A migration window exists where new stores resolve identity/aliases upstream
   while legacy stores still need the read-side shim; the shim therefore stays,
   gated on schema version, rather than being deleted.
+
+## Amendments
+
+- 2026-10-14: The validators accept only the current major version of each level. A store below `min_supported` gets one version error. A reader opens such a store through a version-gated shim. This replaces the conformance leg of frozen real legacy stores that keep validating: the real stores under `conformance/real_stores` are now current producer output (ccatobs/zarr-spectral-schema PR #31, real stores at L0 3 and L1 2.0). Maintainer approval of 2026-10-14 in ccatobs/zarr-spectral-schema#19 (dimensions, units and the scientific frame).
+- 2026-10-14: Not-applicable sentinels. A required field is present in every store, also where it does not apply. A string then holds `"NONE"`, a number holds JSON null, and an array holds NaN as its fill value. NaN is not an attr value. Maintainer decision in ccatobs/zarr-spectral-schema#19.
+- 2026-10-15: A spec array may declare `fill_value`. Both validators compare it exactly with the Zarr v3 metadata of the array, an integer fill value as a JSON integer. The generic interpreter of each binding reads the field like any other spec field (ccatobs/zarr-spectral-schema PR #29, uint32 L0 counts and flag bit 8).
+- 2026-10-15: A change inside a major version that is not yet released needs no further version bump. L0 3 took the `uint32` counts of ADR 0013 (L0 counts are uint32) while L0 3 existed only on `epic/21`. Maintainer decision in ccatobs/zarr-spectral-schema#27 (L0 count dtype for counts of 2^31 and above).

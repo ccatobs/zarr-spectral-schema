@@ -96,6 +96,8 @@ def test_below_floor_is_one_version_error(stores, name, attr):
     result = zss.check(stores / name)
     assert len(result.errors) == 1, result.errors
     assert attr in result.errors[0] and "minimum supported" in result.errors[0]
+    # A version error carries no [<level>] prefix (ADR 0009).
+    assert not result.errors[0].startswith("["), result.errors[0]
 
 
 def test_package_version_independent_of_on_disk(stores):
