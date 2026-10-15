@@ -22,8 +22,7 @@ const GENERATED: &[&str] = &[
     "l0_sharded.zarr",
     "l1_l0_store_abs_path.zarr",
 ];
-/// Two errors when readable; served for the deny cases only (its dtype message
-/// quotes the dtype differently in the two bindings, a finding older than #20).
+/// Two errors when readable; served for the deny cases only.
 const BAD_SKYDIFF: &str = "l1_bad_skydiff.zarr";
 /// A store under a key with a space, read through its `%20` URL.
 const SPACED: &str = "my store.zarr";

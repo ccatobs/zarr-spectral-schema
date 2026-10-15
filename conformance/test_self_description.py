@@ -120,6 +120,7 @@ FLAG_BITS = {
     "ELEVATION_LOW": 1 << 5,
     "ML_FLAGGED": 1 << 6,
     "MANUAL": 1 << 7,
+    "LOW_TRANSMISSION": 1 << 8,
 }
 
 

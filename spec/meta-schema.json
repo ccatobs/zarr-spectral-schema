@@ -203,6 +203,10 @@
           "description": "FITS unit string as astropy parses it (\"\" = dimensionless). Producers write it as the array's `units` attr. Omitted for labels, indices, counts of items, strings and bitmasks.",
           "type": "string"
         },
+        "fill_value": {
+          "description": "The fill value the array declares in its Zarr metadata. A store whose array declares another one is an error. An integer; the store must hold the same integer, not a float.",
+          "type": "integer"
+        },
         "required": { "type": "boolean" },
         "attrs": {
           "description": "Attributes of the array itself (e.g. keepbits), checked like group attrs.",
@@ -220,7 +224,7 @@
       }
     },
     "dtype_name": {
-      "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "bool", "string"]
+      "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "uint32", "bool", "string"]
     },
     "precedence_alias": {
       "description": "One canonical attribute's source-keyword precedence chain.",

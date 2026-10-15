@@ -43,6 +43,8 @@ class ArrayView:
     # zarr v3 `dimension_names` as parsed (None when absent or null)
     dimension_names: Any = None
     attrs: dict[str, Any] = field(default_factory=dict)
+    # zarr v3 `fill_value` as parsed (None when absent)
+    fill_value: Any = None
 
     @property
     def ndim(self) -> int:
@@ -121,6 +123,7 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
                 shape=_shape(meta.get("shape")),
                 dimension_names=meta.get("dimension_names"),
                 attrs=_attributes(meta),
+                fill_value=meta.get("fill_value"),
             )
         elif meta.get("node_type") == "group":
             view.group_attrs[child] = _attributes(meta)

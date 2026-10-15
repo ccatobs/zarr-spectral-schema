@@ -103,6 +103,40 @@ fn valid_dump_count_dtype_and_dims_are_checked() {
     }
 }
 
+// ── 8. L0 counts: uint32 with a saturated-counter fill value ─────────────
+
+#[test]
+fn l0_int32_counts_are_a_dtype_error_naming_data_5d() {
+    let e = errors("l0_int32_counts.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("dtype")
+            && m.contains("uint32")),
+        "expected a dtype error on data_5d, got: {e:?}"
+    );
+}
+
+#[test]
+fn l0_wrong_fill_value_names_the_array_expected_and_found() {
+    let e = errors("l0_bad_fill_value.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("fill_value 0 != expected 4294967295")),
+        "expected a fill_value error, got: {e:?}"
+    );
+    assert!(e.iter().all(|m| m.starts_with("[L0] ")), "{e:?}");
+}
+
+#[test]
+fn l0_float_fill_value_is_a_mismatch() {
+    let e = errors("l0_float_fill_value.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("fill_value 4294967295.0 != expected 4294967295")),
+        "expected a fill_value error, got: {e:?}"
+    );
+}
+
 // ── 7. one writer per store: source_l0_store holds a URI reference ────────
 
 #[test]

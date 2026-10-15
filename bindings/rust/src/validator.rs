@@ -22,8 +22,8 @@
 //!   sub-groups — all resolved by the same generic walk, never hand-branched.
 //!   The spec's `one_of` (exactly one of these groups per target), `equals`
 //!   (attr value constraint), `format` (`uri-reference`), `enum` (value set),
-//!   `sentinel` (not-applicable value), `prefix` (array family), dtype sets and
-//!   array `attrs` are interpreted the same way. Each array's `dimension_names`
+//!   `sentinel` (not-applicable value), `prefix` (array family), dtype sets,
+//!   `fill_value` and array `attrs` are interpreted the same way. Each array's `dimension_names`
 //!   and `units` attr are checked against its `dims`/`units`; arrays at one
 //!   target agree on the length of each shared dimension; a multi-frontend scan
 //!   group holds no scan-or-band attr. Every structure finding starts with
@@ -115,6 +115,9 @@ struct ArraySpec {
     #[serde(default)]
     units: Option<String>,
     required: bool,
+    /// Fill value the array must declare in its Zarr metadata.
+    #[serde(default)]
+    fill_value: Option<serde_json::Number>,
     /// Attributes of the array itself (e.g. `keepbits`).
     #[serde(default)]
     attrs: BTreeMap<String, AttrSpec>,
@@ -182,6 +185,8 @@ struct ArrayMeta {
     /// zarr v3 `dimension_names` as parsed (`None` when absent or null).
     dimension_names: Option<Value>,
     attrs: Map<String, Value>,
+    /// zarr v3 `fill_value` as parsed (`None` when absent).
+    fill_value: Option<Value>,
 }
 
 fn load_spec() -> Spec {
@@ -460,6 +465,7 @@ fn check_group_arrays(
 }
 
 /// Check one array path: node type, presence (if required), dtype, ndim,
+/// `fill_value` (when the spec declares one),
 /// `dimension_names` against the spec's `dims`, the `units` attr and the
 /// array's own `attrs`.
 fn check_array(
@@ -489,6 +495,16 @@ fn check_array(
             "[{level_name}] array '{rel}' dtype {:?} != expected {}",
             arr.dtype, aspec.dtype
         ));
+    }
+    if let Some(want) = &aspec.fill_value {
+        let want = Value::Number(want.clone());
+        // Exact: serde_json numbers differ by kind, so 4294967295.0 is not 4294967295.
+        if arr.fill_value.as_ref() != Some(&want) {
+            let got = arr.fill_value.as_ref().map_or("null".to_string(), Value::to_string);
+            result.errors.push(format!(
+                "[{level_name}] array '{rel}' fill_value {got} != expected {want}"
+            ));
+        }
     }
     match &arr.shape {
         None => result.errors.push(format!(
@@ -963,6 +979,7 @@ fn walk<B: Backend>(
                             shape,
                             dimension_names,
                             attrs: attributes(&meta),
+                            fill_value: meta.get("fill_value").cloned(),
                         },
                     );
                 }
