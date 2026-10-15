@@ -2,22 +2,57 @@
 
 Producer output that both validators must read cleanly. The real-store tests
 (`conformance/test_real_stores.py`, `bindings/rust/tests/real_stores.rs`)
-validate every store listed here and fail when one is missing. Since #19
-(L0 3, L1 2.0) these stores sit below `min_supported`: each gets exactly one
-version error, the below-floor error, and no metadata error. Fresh stores
-replace them once the producers write the #19 contract (ccatobs/kalibrate#101).
+validate every store listed here and fail when one is missing. Each store is
+at the current versions (L0 3, L1 2.0) and gets zero findings in both
+bindings. The ORION_KL pair is also served on S3, and the object-storage
+tests (`test_object_storage.py`, `object_storage.rs`) read it there without
+an error. `test_real_stores.py` also checks that no attribute and no string
+array cell holds a local absolute path.
 
 | Store | Level | Shape |
 |---|---|---|
 | `zarr/SOFIA_UPGREAT_SINGLE_POINT_TP.zarr` | L0 | single frontend, one calibration scan, one source scan |
 | `calibrate/SINGLE_POINT_TP` | L1 | single frontend, one scan |
-| `zarr/SOFIA_UPGREAT_ORION_KL.zarr` | L0 | multi frontend, scans `scan_0299NN` and `scan_10299NN` |
+| `zarr/SOFIA_UPGREAT_ORION_KL.zarr` | L0 | multi frontend, scans `scan_029951` and `scan_029952`, each with `band_0` and `band_1` |
 | `calibrate/ORION_KL` | L1 | multi frontend, one scan with `band_0` and `band_1` |
 
-- Source: `chai-software/calibrate_parity_tests/output/zarr/` (L0, zarr-fits 0.2.0)
-  and `chai-software/calibrate_parity_tests/output/calibrate/` (L1, cal engine 0.2.0).
-- Copied on 2026-10-14, the day the parity harness wrote them.
-- Crop: none. Every file is byte-identical to the producer output.
-- The `zarr/` and `calibrate/` layout matches the source, so the L1
+- Producer: ccatobs/kalibrate `epic/21` at 5bf7c7b (PR #130, the extended
+  L0–L1 contract), built with `make release-full` in a git checkout, so
+  `cal_engine_commit` names the commit: zarr-fits 0.2.0 and calibrate (cal
+  engine 0.2.0).
+- Input: the FITS datasets `SOFIA_UPGREAT_SINGLE_POINT_TP` and
+  `SOFIA_UPGREAT_ORION_KL` of `chai-software/calibrate_parity_tests/data/`,
+  and its ATM table `atm_models/atm-table-test-convert.catm`.
+- Written on 2026-10-15 with the commands below. The working directory is the
+  one that holds `chai-software/`. The producers store the input paths as
+  given, so `fits_folder`, `original_fits_file` (in `raw_fits_headers`) and
+  `atm_table_info.path` read `chai-software/calibrate_parity_tests/…`.
+  `O` is a scratch directory; `zarr/` and `calibrate/` sit beside each other
+  in it.
+
+  ```sh
+  O=/path/to/scratch
+  D=chai-software/calibrate_parity_tests/data
+  ATM=chai-software/calibrate_parity_tests/atm_models/atm-table-test-convert.catm
+  zarr-fits convert --fits-folder $D/SOFIA_UPGREAT_SINGLE_POINT_TP \
+      --zarr-path $O/zarr/SOFIA_UPGREAT_SINGLE_POINT_TP.zarr
+  zarr-fits convert --fits-folder $D/SOFIA_UPGREAT_ORION_KL \
+      --zarr-path $O/zarr/SOFIA_UPGREAT_ORION_KL.zarr
+  calibrate -i $O/zarr/SOFIA_UPGREAT_SINGLE_POINT_TP.zarr \
+      --output $O/calibrate/SINGLE_POINT_TP --atm-table $ATM \
+      --physics kalibrate-compat --foeff 0.97 -q
+  calibrate -i $O/zarr/SOFIA_UPGREAT_ORION_KL.zarr \
+      --output $O/calibrate/ORION_KL --atm-table $ATM \
+      --physics kalibrate-compat --foeff 0.95 --mode tp -q
+  ```
+
+  The calibrate flags are those of the parity harness (`tests.yaml`).
+  ORION_KL adds `--mode tp`: its scan is a beam-switch scan, which calibrate
+  does not calibrate in the auto-detected mode. Total power calibrates its
+  ON against its OFF subscans, as the stores of #18 (accept real output) did.
+- Crop: none. Only the session lock `.calibrate.lock` of each L1 output is
+  left out; every other file is byte-identical to the producer output.
+- The `zarr/` and `calibrate/` layout matches the producer output, so the L1
   `source_l0_store` attr (`../../zarr/<name>.zarr`) resolves inside this directory.
-- Never edit these files. To refresh them, copy the new producer output whole.
+- Never edit these files. To refresh them, write new producer output with the
+  commands above and copy it whole except `.calibrate.lock`.

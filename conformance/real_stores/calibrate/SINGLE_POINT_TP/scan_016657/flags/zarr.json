@@ -75,5 +75,12 @@
       "repository": "https://github.com/zarrs/zarrs",
       "version": "0.23.6"
     }
-  }
+  },
+  "dimension_names": [
+    "channel",
+    "dump",
+    "receiver",
+    "array",
+    "subscan"
+  ]
 }

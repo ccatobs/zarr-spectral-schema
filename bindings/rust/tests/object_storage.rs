@@ -22,7 +22,8 @@ const GENERATED: &[&str] = &[
     "l0_sharded.zarr",
     "l1_l0_store_abs_path.zarr",
 ];
-/// Two errors when readable; served for the deny cases only.
+/// Three errors when readable (skydiff/spectrum_0 dtype, ndim and
+/// dimension_names); served for the deny cases only.
 const BAD_SKYDIFF: &str = "l1_bad_skydiff.zarr";
 /// A store under a key with a space, read through its `%20` URL.
 const SPACED: &str = "my store.zarr";
@@ -144,13 +145,10 @@ fn s3_verdict_matches_the_local_and_the_python_verdict() {
             "{name}: s3 vs local"
         );
         assert_eq!(remote.errors, py, "{name}: Rust vs Python");
-        // The committed real stores (L0 2, L1 1.3) sit below min_supported since #19.
+        // The committed real stores (L0 3, L1 2.0) are green.
         let green = !matches!(
             name.as_str(),
-            "miss_array.zarr"
-                | "l1_l0_store_abs_path.zarr"
-                | "ORION_KL"
-                | "SOFIA_UPGREAT_ORION_KL.zarr"
+            "miss_array.zarr" | "l1_l0_store_abs_path.zarr"
         );
         assert_eq!(remote.ok(), green, "{name}: {:?}", remote.errors);
     }
@@ -161,14 +159,9 @@ fn validator_reads_only_zarr_json_objects() {
     let mut s3 = s3().lock().unwrap();
     s3.requests();
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"] {
-        // Every node read: no listing or metadata error (the real stores carry
-        // the below-floor version error since #19).
+        // Every node read, and every store green.
         let r = zss::check(Path::new(&url(name)));
-        assert!(
-            !r.errors.iter().any(|e| e.contains("cannot")),
-            "{name}: {:?}",
-            r.errors
-        );
+        assert_eq!(r.errors, Vec::<String>::new(), "{name}");
     }
     let log = s3.requests();
     let served = log["served"].as_array().unwrap();

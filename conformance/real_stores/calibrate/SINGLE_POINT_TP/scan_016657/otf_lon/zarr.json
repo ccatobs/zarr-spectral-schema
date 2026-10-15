@@ -61,10 +61,15 @@
     }
   ],
   "attributes": {
+    "units": "deg",
     "_zarrs": {
       "description": "This array was created with zarrs",
       "repository": "https://github.com/zarrs/zarrs",
       "version": "0.23.6"
     }
-  }
+  },
+  "dimension_names": [
+    "dump",
+    "subscan"
+  ]
 }

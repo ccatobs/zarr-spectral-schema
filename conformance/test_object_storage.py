@@ -76,17 +76,16 @@ def s3(local):
 def test_s3_store_gets_the_verdict_of_the_local_store(s3, local, name):
     remote = zss.check(f"s3://{s3_server.BUCKET}/{name}")
     assert remote.errors == zss.check(local[name]).errors
-    # The committed real stores (L0 2, L1 1.3) sit below min_supported since #19.
-    assert remote.ok == (name in {"l1_single.zarr", "l0_sharded.zarr"}), remote.errors
+    # The committed real stores (L0 3, L1 2.0) are green.
+    assert remote.ok == (name != "miss_array.zarr"), remote.errors
 
 
 def test_validator_reads_only_zarr_json_objects(s3):
     s3.take_requests()
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"]:
-        # Every node read: no listing or metadata error (the real stores carry
-        # the below-floor version error since #19).
+        # Every node read, and every store green.
         errors = zss.check(f"s3://{s3_server.BUCKET}/{name}").errors
-        assert not any("cannot" in e for e in errors), errors
+        assert errors == [], errors
     served = s3.take_requests()
     assert any(path.endswith("/zarr.json") for _, path, _ in served), served
     assert s3.offending(served) == []
