@@ -144,13 +144,10 @@ fn s3_verdict_matches_the_local_and_the_python_verdict() {
             "{name}: s3 vs local"
         );
         assert_eq!(remote.errors, py, "{name}: Rust vs Python");
-        // The committed real stores (L0 2, L1 1.3) sit below min_supported since #19.
+        // The committed real stores (L0 3, L1 2.0) are green.
         let green = !matches!(
             name.as_str(),
-            "miss_array.zarr"
-                | "l1_l0_store_abs_path.zarr"
-                | "ORION_KL"
-                | "SOFIA_UPGREAT_ORION_KL.zarr"
+            "miss_array.zarr" | "l1_l0_store_abs_path.zarr"
         );
         assert_eq!(remote.ok(), green, "{name}: {:?}", remote.errors);
     }
@@ -161,8 +158,7 @@ fn validator_reads_only_zarr_json_objects() {
     let mut s3 = s3().lock().unwrap();
     s3.requests();
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"] {
-        // Every node read: no listing or metadata error (the real stores carry
-        // the below-floor version error since #19).
+        // Every node read: no listing or metadata error.
         let r = zss::check(Path::new(&url(name)));
         assert!(
             !r.errors.iter().any(|e| e.contains("cannot")),
