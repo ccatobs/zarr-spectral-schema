@@ -121,7 +121,9 @@ versions:
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
     # 3 (#19): identity and l0_complete required, dims/units, site location,
-    # scan_N/band_B layout. The validator accepts the current major only.
+    # scan_N/band_B layout. Also in 3: uint32 counts with their fill value
+    # (#27), and per-pixel frontend_backends and raw_fits_headers [R,A,S]
+    # (kalibrate#101). The validator accepts the current major only.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -129,7 +131,8 @@ versions:
     on_disk: string             # cal-io writes this root attr as a JSON string
     # 2.0 (#19): dims/units, the required frame set, identity required and at
     # band placement with the quality record and provenance in multi-frontend
-    # stores. The validator accepts the current major only.
+    # stores. Also in 2.0: gamma in ct/(K s), counts per second per kelvin
+    # (kalibrate#101). The validator accepts the current major only.
     value: "2.0"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
@@ -205,7 +208,7 @@ levels:
       # offsets are auditable and re-derivable. ONE object-typed group attr; the
       # generic validator type-checks the top-level object only — the nested
       # shape below is writer-enforced (+ writer-side conformance CI), backed by
-      # the verbatim `raw_fits_headers [S]` full-header array:
+      # the verbatim `raw_fits_headers [R,A,S]` full-header array:
       #   - per-subscan rotating terms:   POSANGLE, ANGLEDIFF, COSYDEL
       #   - per-pixel/array static geometry: RXDX/RXDY, REFRXDX/REFRXDY,
       #                                      SIGNRXDX/SIGNRXDY
@@ -246,10 +249,17 @@ levels:
           freq_off:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
           ref_channel:      { dtype: float32, ndim: 1, dims: [subscan], required: true }
           lloadsn:          { dtype: int32,   ndim: 1, dims: [subscan], required: true }
-          # String arrays (the str_array per-language seam): zarr v3 `string`, 1D [S].
+          # String arrays (the str_array per-language seam): zarr v3 `string`. Most
+          # are 1D [S]; frontend_backends and raw_fits_headers are per pixel [R,A,S].
           sobsmode:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
-          frontend_backends: { dtype: string, ndim: 1, dims: [subscan], required: true }
-          raw_fits_headers: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          # Per pixel [R,A,S], the shape of pixel_offset_lon: a CHAI FITS file holds
+          # one pixel, so each record has its own header. A cell of frontend_backends
+          # holds the record identifier zarr-fits takes from the FITS file name
+          # (e.g. HFAV_PX00_S), not the FRONTEND keyword (HFAV_PX00); a cell of
+          # raw_fits_headers holds its verbatim header (JSON). A cell with
+          # no record (fewer pixels than R) holds the empty string.
+          frontend_backends: { dtype: string, ndim: 3, dims: [receiver, array, subscan], required: true }
+          raw_fits_headers: { dtype: string,  ndim: 3, dims: [receiver, array, subscan], required: true }
           instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
           nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
           chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
@@ -293,8 +303,9 @@ levels:
           freq_off:         { dtype: float64, ndim: 1, dims: [subscan], units: Hz, required: true }
           ref_channel:      { dtype: float32, ndim: 1, dims: [subscan], required: true }
           sobsmode:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
-          frontend_backends: { dtype: string, ndim: 1, dims: [subscan], required: true }
-          raw_fits_headers: { dtype: string,  ndim: 1, dims: [subscan], required: true }
+          # Per pixel [R,A,S], as in the source group.
+          frontend_backends: { dtype: string, ndim: 3, dims: [receiver, array, subscan], required: true }
+          raw_fits_headers: { dtype: string,  ndim: 3, dims: [receiver, array, subscan], required: true }
           instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
           nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
           chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
@@ -415,7 +426,7 @@ levels:
           t_int:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S]
           t_off:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] OFF integ time
           t_rec_ssb:    { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A
-          gamma:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: ct/K, required: true }
+          gamma:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: ct/(K s), required: true }   # counts per second per kelvin
           tau_signal:   { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, signal sideband
           tau_image:    { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, image sideband
           t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky

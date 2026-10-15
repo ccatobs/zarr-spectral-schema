@@ -200,3 +200,58 @@ fn url_without_the_s3_feature_is_an_explicit_error() {
     let e = zss::validate(Path::new("s3://zss/l1_single.zarr"));
     assert_eq!(e, ["s3://zss/l1_single.zarr: s3:// needs the `s3` feature"]);
 }
+
+// ── 9. one FITS header per pixel; gamma in counts per second per kelvin ──
+
+#[test]
+fn l0_headers_per_pixel_are_green() {
+    // l0_sharded has R = A = S = 2: one cell per pixel and subscan.
+    assert!(errors("l0_sharded.zarr").is_empty());
+}
+
+#[test]
+fn l0_headers_without_the_pixel_axes_are_rejected() {
+    for (name, finding) in [
+        ("l0_headers_1d.zarr", "ndim 1 != expected 3"),
+        ("l0_headers_array_subscan.zarr", "ndim 2 != expected 3"),
+    ] {
+        let e = errors(name);
+        for array in ["raw_fits_headers", "frontend_backends"] {
+            let rel = format!("scan_000001/source/{array}");
+            assert!(
+                e.iter().any(|m| m.contains(&rel) && m.contains(finding)),
+                "{name}: expected an ndim error on {array}, got: {e:?}"
+            );
+            assert!(
+                e.iter()
+                    .any(|m| m.contains(&rel) && m.contains("dimension_names")),
+                "{name}: expected a dimension_names error on {array}, got: {e:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn l0_headers_with_a_wrong_pixel_axis_length_are_rejected() {
+    for (name, dim) in [
+        ("l0_headers_receiver_mismatch.zarr", "receiver"),
+        ("l0_headers_array_mismatch.zarr", "array"),
+    ] {
+        let e = errors(name);
+        assert!(
+            e.iter().any(|m| m.contains(&format!("dimension '{dim}'"))
+                && m.contains("2 in [source/frontend_backends")),
+            "{name}: expected a dimension length error, got: {e:?}"
+        );
+    }
+}
+
+#[test]
+fn l1_gamma_in_counts_per_kelvin_is_a_units_error() {
+    let e = errors("l1_gamma_old_unit.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/gamma")
+            && m.contains("units \"ct/K\" != expected \"ct/(K s)\"")),
+        "expected a units error, got: {e:?}"
+    );
+}

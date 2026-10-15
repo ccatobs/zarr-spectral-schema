@@ -177,3 +177,60 @@ def test_l0_float_fill_value_is_a_mismatch(stores):
         L0_COUNTS in e and "fill_value 4294967295.0 != expected 4294967295" in e
         for e in errors
     ), errors
+
+
+# ── 9. one FITS header per array; gamma in counts per second per kelvin ───
+
+
+PIXEL_HEADERS = ["raw_fits_headers", "frontend_backends"]
+
+
+@pytest.mark.parametrize("name", PIXEL_HEADERS)
+def test_l0_headers_per_pixel_are_green(stores, name):
+    # l0_sharded has R = A = S = 2: the headers hold one cell per pixel and subscan.
+    meta = json.loads(
+        (
+            stores / "l0_sharded.zarr" / f"scan_000001/source/{name}" / "zarr.json"
+        ).read_text()
+    )
+    assert meta["shape"] == [2, 2, 2]
+    assert meta["dimension_names"] == ["receiver", "array", "subscan"]
+    assert zss.validate(stores / "l0_sharded.zarr") == []
+
+
+@pytest.mark.parametrize("name", PIXEL_HEADERS)
+@pytest.mark.parametrize(
+    "fixture, finding",
+    [
+        ("l0_headers_1d.zarr", "ndim 1 != expected 3"),
+        ("l0_headers_array_subscan.zarr", "ndim 2 != expected 3"),
+    ],
+)
+def test_l0_headers_without_the_pixel_axes_are_rejected(stores, name, fixture, finding):
+    errors = zss.validate(stores / fixture)
+    rel = f"scan_000001/source/{name}"
+    assert any(rel in e and finding in e for e in errors), errors
+    assert any(rel in e and "dimension_names" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "fixture, dim",
+    [
+        ("l0_headers_receiver_mismatch.zarr", "receiver"),
+        ("l0_headers_array_mismatch.zarr", "array"),
+    ],
+)
+def test_l0_headers_with_a_wrong_pixel_axis_length_are_rejected(stores, fixture, dim):
+    errors = zss.validate(stores / fixture)
+    assert any(
+        f"dimension '{dim}'" in e and "2 in [source/frontend_backends" in e
+        for e in errors
+    ), errors
+
+
+def test_l1_gamma_in_counts_per_kelvin_is_a_units_error(stores):
+    errors = zss.validate(stores / "l1_gamma_old_unit.zarr")
+    assert any(
+        "scan_000001/gamma" in e and 'units "ct/K" != expected "ct/(K s)"' in e
+        for e in errors
+    ), errors
