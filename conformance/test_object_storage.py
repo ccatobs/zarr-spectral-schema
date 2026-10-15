@@ -83,9 +83,9 @@ def test_s3_store_gets_the_verdict_of_the_local_store(s3, local, name):
 def test_validator_reads_only_zarr_json_objects(s3):
     s3.take_requests()
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"]:
-        # Every node read: no listing or metadata error.
+        # Every node read, and every store green.
         errors = zss.check(f"s3://{s3_server.BUCKET}/{name}").errors
-        assert not any("cannot" in e for e in errors), errors
+        assert errors == [], errors
     served = s3.take_requests()
     assert any(path.endswith("/zarr.json") for _, path, _ in served), served
     assert s3.offending(served) == []
