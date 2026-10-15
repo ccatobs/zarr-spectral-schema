@@ -165,7 +165,7 @@ def _write_arrays(
     Every array is written with the spec's ``dims`` as its zarr v3
     ``dimension_names`` and, where the spec declares ``units``, a ``units`` attr.
     ``array_overrides`` maps a store-relative path to ``dtype``/``ndim``/
-    ``dims``/``units``/``shape`` values that replace the declared ones
+    ``dims``/``units``/``shape``/``fill_value`` values that replace the declared ones
     (negatives; ``None`` writes no ``dimension_names`` / no ``units`` attr), and
     ``attr_values`` to literal array attr values. ``sharded`` writes every axis
     with length 2 and a chunk layout other than the writer default: 5-D arrays
@@ -201,11 +201,9 @@ def _write_arrays(
             attributes={} if aspec.get("units") is None else {"units": aspec["units"]},
             # NaN fill on float arrays: the not-applicable value of an array.
             # A declared fill_value (L0 counts: saturated counter) wins.
-            fill_value=aspec["fill_value"]
-            if "fill_value" in aspec
-            else float("nan")
-            if dtype.startswith("float")
-            else None,
+            fill_value=aspec.get(
+                "fill_value", float("nan") if dtype.startswith("float") else None
+            ),
             **layout,
         )
         _write_attrs(
@@ -617,11 +615,14 @@ def emit_storage_fixtures(out: Path) -> None:
     )
     # L0 counts are uint32 with the saturated-counter fill value (#27).
     counts = f"{_SCAN}/source/data_5d"
-    # int32 cannot hold the uint32 fill value, so the old store carries 0.
+    # The pre-#27 store: int32 counts with fill value i32::MIN, as the old stores carry.
     emit_l0(
         out / "l0_int32_counts.zarr",
-        array_overrides={counts: {"dtype": "int32", "fill_value": 0}},
+        array_overrides={counts: {"dtype": "int32", "fill_value": -(2**31)}},
     )
+    # A JSON float where the spec declares an integer is a mismatch in both bindings.
+    store = emit_l0(out / "l0_float_fill_value.zarr")
+    _patch_meta(store, counts, lambda m: m.__setitem__("fill_value", 4294967295.0))
     emit_l0(out / "l0_bad_fill_value.zarr", array_overrides={counts: {"fill_value": 0}})
     # The valid dump count per subscan is int32 [S] where present.
     bad = {"dtype": "float64", "ndim": 2, "dims": ["dump", "subscan"]}

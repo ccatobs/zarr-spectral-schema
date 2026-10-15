@@ -127,6 +127,16 @@ fn l0_wrong_fill_value_names_the_array_expected_and_found() {
     assert!(e.iter().all(|m| m.starts_with("[L0] ")), "{e:?}");
 }
 
+#[test]
+fn l0_float_fill_value_is_a_mismatch() {
+    let e = errors("l0_float_fill_value.zarr");
+    assert!(
+        e.iter().any(|m| m.contains("scan_000001/source/data_5d")
+            && m.contains("fill_value 4294967295.0 != expected 4294967295")),
+        "expected a fill_value error, got: {e:?}"
+    );
+}
+
 // ── 7. one writer per store: source_l0_store holds a URI reference ────────
 
 #[test]

@@ -17,7 +17,8 @@ Three checks today:
   walk — never hand-branched per field. The spec's ``one_of`` (exactly one of
   these groups per target), ``equals`` (attr value constraint), ``format``
   (``uri-reference``), ``enum`` (value set), ``sentinel`` (not-applicable
-  value), ``prefix`` (array family), dtype sets and array ``attrs`` are
+  value), ``prefix`` (array family), dtype sets, ``fill_value`` and array
+  ``attrs`` are
   interpreted the same way. Each array's ``dimension_names`` and ``units`` attr
   are checked against its ``dims``/``units``; arrays at one target agree on the
   length of each shared dimension; a multi-frontend scan group holds no
@@ -276,7 +277,7 @@ def _check_array(
     seen: list[tuple[str, list[str], list[int]]],
 ) -> None:
     """Check one array path: node type, presence (if required), dtype, ndim,
-    ``dimension_names`` against the spec's ``dims``, the ``units`` attr and the
+    ``fill_value`` (when the spec declares one), ``dimension_names`` against the spec's ``dims``, the ``units`` attr and the
     array's own ``attrs``."""
     if rel in view.group_attrs:
         result.errors.append(f"[{level_name}] '{rel}' is a group, expected an array")
@@ -289,11 +290,13 @@ def _check_array(
     allowed = aspec["dtype"] if isinstance(aspec["dtype"], list) else [aspec["dtype"]]
     if arr.dtype not in allowed:
         result.errors.append(
-            f"[{level_name}] array '{rel}' dtype {arr.dtype!r} != expected {aspec['dtype']!r}"
+            f"[{level_name}] array '{rel}' dtype {json.dumps(arr.dtype)} "
+            f"!= expected {json.dumps(aspec['dtype'])}"
         )
     if "fill_value" in aspec:
         want, got = aspec["fill_value"], arr.fill_value
-        if isinstance(got, bool) or not isinstance(got, (int, float)) or got != want:
+        # Exact: an integer, never a float (Zarr v3 writes an integer fill as one).
+        if isinstance(got, bool) or not isinstance(got, int) or got != want:
             result.errors.append(
                 f"[{level_name}] array '{rel}' fill_value {json.dumps(got)} "
                 f"!= expected {json.dumps(want)}"

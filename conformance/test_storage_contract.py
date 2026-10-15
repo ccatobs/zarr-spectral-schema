@@ -63,7 +63,7 @@ def test_l1_float64_spectra_and_t_sys_are_green(stores):
 
 def test_l1_int16_spectra_is_rejected(stores):
     errors = zss.validate(stores / "l1_int16_spectra.zarr")
-    assert any("scan_000001/spectra" in e and "'int16'" in e for e in errors), errors
+    assert any("scan_000001/spectra" in e and '"int16"' in e for e in errors), errors
 
 
 def test_l1_integer_keepbits_is_green(stores):
@@ -166,7 +166,14 @@ def test_l0_int32_counts_are_a_dtype_error_naming_data_5d(stores):
 def test_l0_wrong_fill_value_names_the_array_expected_and_found(stores):
     errors = zss.validate(stores / "l0_bad_fill_value.zarr")
     assert any(
-        L0_COUNTS in e and "fill_value" in e and "4294967295" in e and "0" in e
-        for e in errors
+        L0_COUNTS in e and "fill_value 0 != expected 4294967295" in e for e in errors
     ), errors
     assert all(e.startswith("[L0] ") for e in errors), errors
+
+
+def test_l0_float_fill_value_is_a_mismatch(stores):
+    errors = zss.validate(stores / "l0_float_fill_value.zarr")
+    assert any(
+        L0_COUNTS in e and "fill_value 4294967295.0 != expected 4294967295" in e
+        for e in errors
+    ), errors

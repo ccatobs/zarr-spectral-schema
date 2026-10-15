@@ -204,8 +204,8 @@
           "type": "string"
         },
         "fill_value": {
-          "description": "The fill value the array declares in its Zarr metadata. A store whose array declares another one is an error.",
-          "type": "number"
+          "description": "The fill value the array declares in its Zarr metadata. A store whose array declares another one is an error. An integer; the store must hold the same integer, not a float.",
+          "type": "integer"
         },
         "required": { "type": "boolean" },
         "attrs": {

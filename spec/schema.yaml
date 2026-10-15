@@ -89,7 +89,8 @@
 # (value constraint): when present, the attr must hold exactly that value; and
 # `format: uri-reference` (RFC 3986 URI reference, not empty, not an absolute
 # path). An array entry may carry `attrs` (the array's own attrs, same rules)
-# and a dtype set (`dtype: [float64, float32]`: any name of the set).
+# a dtype set (`dtype: [float64, float32]`: any name of the set), and
+# `fill_value` (an integer: the array's Zarr metadata must declare exactly it).
 # An attr may carry `enum: [...]`, its value set: the attr holds one of these.
 # An attr with `sentinel: true` may hold the not-applicable sentinel instead of a
 # value: "NONE" for a string, JSON null for a number (ADR-0007). A required
