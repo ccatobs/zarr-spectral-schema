@@ -91,15 +91,48 @@ class ValidationResult:
 
 
 def validate(store_path: str | Path) -> list[str]:
-    """Validate a store; return errors only (empty == conformant).
+    """Validate a store; return errors only (empty list == conformant).
 
     Back-compat surface. Use :func:`check` to also surface newer-minor warnings.
+
+    Parameters
+    ----------
+    store_path
+        Local path or URL (``s3://bucket/store.zarr``) of a Zarr v3 store. An
+        ``s3://`` URL needs the ``s3`` extra and the ``AWS_*`` environment variables.
+
+    Returns
+    -------
+    list[str]
+        The errors of :func:`check`. A structure finding starts with ``[L0] `` or
+        ``[L1] ``; a version error and a level-detection error have no prefix.
+        Never raises for a bad store: an unreadable root is returned as one error.
     """
     return check(store_path).errors
 
 
 def check(store_path: str | Path) -> ValidationResult:
-    """Validate a store against the spec, returning errors and warnings."""
+    """Validate a store against the spec, returning errors and warnings.
+
+    The validator reads ``zarr.json`` objects only, never a chunk. It accepts the
+    current major version of each level (L0 3, L1 2.0). A store below
+    ``min_supported`` gets one version error.
+
+    Parameters
+    ----------
+    store_path
+        Local path or URL (``s3://bucket/store.zarr``) of a Zarr v3 store. An
+        ``s3://`` URL needs the ``s3`` extra and takes its endpoint, region and
+        credentials from the standard ``AWS_*`` environment variables.
+
+    Returns
+    -------
+    ValidationResult
+        ``errors``: structure findings (prefix ``[L0] `` or ``[L1] ``), version
+        errors and level-detection errors (no prefix). ``warnings``: a newer
+        minor version. A metadata file that does not parse is an error, not an
+        exception. An unreadable root group gives one error and nothing else.
+    """
     spec = load_spec()
     try:
         view = read_store(store_path)
@@ -109,11 +142,38 @@ def check(store_path: str | Path) -> ValidationResult:
 
 
 def validate_view(view: StoreView, spec: dict) -> list[str]:
-    """Errors-only view-level validation (back-compat)."""
+    """Errors-only validation of a store view that :func:`read_store` built.
+
+    Parameters
+    ----------
+    view
+        The normalized store view.
+    spec
+        The loaded spec, from :func:`load_spec`.
+
+    Returns
+    -------
+    list[str]
+        The errors of :func:`check_view`.
+    """
     return check_view(view, spec).errors
 
 
 def check_view(view: StoreView, spec: dict) -> ValidationResult:
+    """Validate a store view against the spec, returning errors and warnings.
+
+    Parameters
+    ----------
+    view
+        The normalized store view.
+    spec
+        The loaded spec, from :func:`load_spec`.
+
+    Returns
+    -------
+    ValidationResult
+        The same result as :func:`check` for the store the view came from.
+    """
     result = ValidationResult()
 
     levels = spec.get("levels", {})

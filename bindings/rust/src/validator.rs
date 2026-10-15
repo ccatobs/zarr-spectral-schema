@@ -155,7 +155,9 @@ impl std::fmt::Display for Dtype {
 /// Outcome of validating a store: hard `errors` and advisory `warnings`.
 #[derive(Debug, Default)]
 pub struct ValidationResult {
+    /// Structure findings, version errors and level-detection errors.
     pub errors: Vec<String>,
+    /// Advisory findings, for example a newer minor version.
     pub warnings: Vec<String>,
 }
 
@@ -198,6 +200,9 @@ fn load_spec() -> Spec {
 /// Validate a Zarr v3 store against the spec. Returns errors; empty = conformant.
 ///
 /// Back-compat surface. Use [`check`] to also surface newer-minor warnings.
+/// `store` is a local path, or an `s3://` URL with the `s3` feature, as for
+/// [`check`]. The errors are those of [`check`]: a structure finding starts with
+/// `[L0] ` or `[L1] `; a version error and a level-detection error do not.
 pub fn validate(store: &Path) -> Vec<String> {
     check(store).errors
 }
@@ -209,6 +214,15 @@ pub fn validate(store: &Path) -> Vec<String> {
 /// region and credentials from the standard `AWS_*` environment variables; its
 /// check blocks on a runtime of its own, so do not call it from inside a tokio
 /// runtime. A local check reads with `std::fs` and needs no runtime.
+///
+/// The check reads `zarr.json` objects only, never a chunk. It accepts the
+/// current major version of each level (L0 3, L1 2.0); a store below
+/// `min_supported` gets one version error.
+///
+/// Returns a [`ValidationResult`]. `errors` holds structure findings (prefix
+/// `[L0] ` or `[L1] `), version errors and level-detection errors (no prefix).
+/// `warnings` holds a newer minor version. A metadata file that does not parse is
+/// an error. An unreadable root group gives one error and nothing else.
 pub fn check(store: &Path) -> ValidationResult {
     let spec = load_spec();
     let mut result = ValidationResult::default();

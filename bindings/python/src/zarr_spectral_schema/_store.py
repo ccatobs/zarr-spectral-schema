@@ -37,6 +37,26 @@ import fsspec
 
 @dataclass
 class ArrayView:
+    """One array node of a store, normalized from its ``zarr.json``.
+
+    Attributes
+    ----------
+    dtype
+        The Zarr v3 data type name, for example ``"uint32"``. The string form and
+        the object form of ``data_type`` give the same name.
+    shape
+        The array shape, or ``None`` when the metadata holds anything else than a
+        list of non-negative integers.
+    dimension_names
+        The Zarr v3 ``dimension_names`` as parsed. ``None`` when absent or null.
+    attrs
+        The user attributes of the array, for example ``units``.
+    fill_value
+        The Zarr v3 ``fill_value`` as parsed. ``None`` when absent.
+    ndim
+        The number of dimensions, ``len(shape)``.
+    """
+
     dtype: str
     # list of non-negative integers, or None when the metadata holds anything else
     shape: list[int] | None
@@ -53,6 +73,21 @@ class ArrayView:
 
 @dataclass
 class StoreView:
+    """A store read into one normalized view; nodes are keyed by relative path.
+
+    Attributes
+    ----------
+    root_attrs
+        The attributes of the root group.
+    group_attrs
+        The attributes of each child group, keyed by path such as ``scan_000001/source``.
+    arrays
+        Each array as an :class:`ArrayView`, keyed by path such as ``scan_000001/source/data_5d``.
+    errors
+        Parse errors of non-root ``zarr.json`` files. A node that does not parse
+        leaves the walk; its children stay in the view.
+    """
+
     root_attrs: dict[str, Any]
     # keyed by store-relative path, e.g. "source" / "source/data_5d"
     group_attrs: dict[str, dict[str, Any]] = field(default_factory=dict)
