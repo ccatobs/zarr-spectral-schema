@@ -27,7 +27,7 @@ contract). Start here:
 - **Old stores.** The validators accept the current major version only. A store below `min_supported` gets one version error, without a prefix. Structure findings follow when the store lacks fields of the current version. A consumer stops on the version error. A newer major version is an error. A newer minor version gives one warning.
 - **Layout.** A scan sits at `scan_N/`. A multi-frontend scan holds one `band_B/` group per frontend, at L0 and L1. Scan names match `scan_` plus six or more digits.
 - **Arrays.** Every array declares `dims`. Producers write them as the Zarr v3 `dimension_names`. Every array with a physical unit declares `units`. The L1 `flags` array uses the `flag_bits` names. Units compare as exact strings: `ct / (K s)` differs from `ct/(K s)` (ADR 0012, units contract).
-- **Identity.** The L0 root holds an `arrays` attr that lists the array names in the order of the array axis. `pixels_per_array` follows that order. The attrs `backend`, `obs_id` and `spectel1` sit at the scan or at the band group, and are optional.
+- **Identity.** At L0, the scan group of a single-frontend scan, or each band group of a multi-frontend scan, holds an `arrays` attr that lists the array names in the order of the array axis. `pixels_per_array` follows that order. The attrs `backend`, `obs_id` and `spectel1` sit at the same group, and are optional.
 - **Offsets.** The per-pixel offsets `pixel_offset_lon` and `pixel_offset_lat` are true-angle offsets (ADR 0014, per-pixel offsets are true-angle offsets).
 - **L1 gain.** The L1 attr `image_gain` holds the image share of the total gain. The signal share is `1 - image_gain`.
 - **Rounding.** The `keepbits` attr of `spectra` and `t_sys` is an integer from 0 to 52.
