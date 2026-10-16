@@ -96,11 +96,15 @@ fn main() {
         }
     }
 
-    // ── flag bits (bit index → u16 mask) ──
+    // ── flag bits (bit index → u16 mask), one name per bit ──
     if let Some(bits) = spec.get("flag_bits").and_then(Value::as_mapping) {
+        let mut names: BTreeMap<u64, String> = BTreeMap::new();
         for (key, val) in bits {
             let name = key.as_str().expect("flag bit key is a string").to_string();
             let bit = val.as_u64().expect("flag bit is an integer");
+            if let Some(other) = names.insert(bit, name.clone()) {
+                panic!("flag bit {bit} has two names: {other} and {name}");
+            }
             let decl = format!("pub const {name}: u16 = 1 << {bit};");
             if let Some(existing) = consts.get(&name) {
                 assert_eq!(

@@ -13,7 +13,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 mod common;
 
-use common::{fixtures, repo_root};
+use common::{fixtures, python_errors, repo_root};
 use serde_json::Value;
 use zarr_spectral_schema as zss;
 
@@ -113,27 +113,6 @@ fn validators_on_object_storage() {
 
 fn url(name: &str) -> String {
     format!("s3://zss/{}", name.replace(' ', "%20"))
-}
-
-/// The Python validator's errors for each URL, run in a subprocess.
-fn python_errors(urls: &[String]) -> Vec<Vec<String>> {
-    let out = Command::new("python3")
-        .arg("-c")
-        .arg(
-            "import json, sys\n\
-             import zarr_spectral_schema as zss\n\
-             print(json.dumps([zss.check(u).errors for u in sys.argv[1:]]))",
-        )
-        .args(urls)
-        .env("PYTHONPATH", repo_root().join("bindings/python/src"))
-        .output()
-        .expect("run the Python validator");
-    assert!(
-        out.status.success(),
-        "Python validator failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).unwrap()
 }
 
 fn s3_verdict_matches_the_local_and_the_python_verdict(s3: &mut S3) {

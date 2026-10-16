@@ -47,10 +47,10 @@ class ArrayView:
     shape
         The array shape, or ``None`` when the metadata holds anything else than a
         list of non-negative integers.
-    dimension_names
-        The Zarr v3 ``dimension_names`` as parsed. ``None`` when absent or null.
     attrs
         The user attributes of the array, for example ``units``.
+    dimension_names
+        The Zarr v3 ``dimension_names`` as parsed. ``None`` when absent or null.
     fill_value
         The Zarr v3 ``fill_value`` as parsed. ``None`` when absent.
     ndim
@@ -60,9 +60,10 @@ class ArrayView:
     dtype: str
     # list of non-negative integers, or None when the metadata holds anything else
     shape: list[int] | None
+    # The positional order of the first release with attrs: dtype, shape, attrs.
+    attrs: dict[str, Any] = field(default_factory=dict)
     # zarr v3 `dimension_names` as parsed (None when absent or null)
     dimension_names: Any = None
-    attrs: dict[str, Any] = field(default_factory=dict)
     # zarr v3 `fill_value` as parsed (None when absent)
     fill_value: Any = None
 

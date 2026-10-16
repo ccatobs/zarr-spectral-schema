@@ -15,7 +15,7 @@
 #
 # Placement model (interpreted by both validators, never hand-branched): a store
 # is L0 or L1, detected by its root `detect` attr. Each group declares `placement`
-# (`scan` | `scan_or_band`) + `inline` (true ⇒ arrays sit directly in the target
+# (`scan_or_band`, the only one) + `inline` (true ⇒ arrays sit directly in the target
 # dir; false ⇒ under `<target>/<groupname>/`). A scan group is multi-frontend iff
 # it has ≥1 `band_<M>` child; `scan_or_band` then resolves to each band group,
 # and a `scan_or_band_attrs` attr on the scan group itself is an error.
@@ -99,15 +99,17 @@
 # Dimensions (#19): each array declares `dims`, its ordered axis names; producers
 # write them as the zarr v3 `dimension_names` field. Arrays at one placement
 # target (a scan group, or a band group of a multi-frontend scan) that share an
-# axis name agree on its length. The axis vocabulary: channel (C), dump (D),
-# receiver (R, a pixel of an array), array (A, a frontend-backend pair) and
-# subscan (S).
+# axis name agree on its length. The axis vocabulary (meta-schema `dimension`):
+# channel (C), dump (D), receiver (R, a pixel of an array), array (A, a
+# frontend-backend pair), subscan (S) and load_dump (the length-1 dump axis of a
+# load-temperature table); a `dims` item outside it is a spec error.
 #
 # Units (#19): an array that holds a physical quantity declares `units`, a FITS
 # unit string as astropy parses it (`K`, `Hz`, `km/s`, `deg`, `rad`, `s`; "" for
 # a dimensionless quantity). Producers write it as the array's `units` attr.
 # Labels, indices, scan numbers, counts of items (n_valid_dumps), strings and
-# the `flags` bitmask declare none.
+# the `flags` bitmask declare none, and hold no `units` attr (a finding).
+# Units compare as strings, exactly (ADR 0012): `ct / (K s)` is not `ct/(K s)`.
 # A scalar attr carries its unit as a name suffix (`pwv_mm`, `site_latitude_deg`).
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
@@ -491,6 +493,13 @@ lists:
                   lloadsn, signal_freq, image_freq, freq_res, freq_off, ref_channel]
   SOURCE_MODES:  ["ON", "OFF", "OTF-ON", "OTF-OFF"]
   CAL_MODES:     ["HOT", "COL", "COLD", "SKY", "ZERO"]
+  # The required L1 frame set (#19, dimensions, units and the frame): its attrs,
+  # at scan-or-band placement and, for the site, at scan placement.
+  FRAME_ATTRS:   [specsys, veldef, vlsr_source, vlsr_source_frame, ref_channel_base,
+                  coord_frame, equinox, projection, offset_convention,
+                  temperature_scale, eta_fss, eta_mb, gain_el_correction,
+                  sideband_mode, image_gain, site_longitude_deg, site_latitude_deg,
+                  site_altitude_m]
 
 # Single attribute-name constants → `pub const … : &str`.
 markers:

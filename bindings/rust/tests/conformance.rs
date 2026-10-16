@@ -188,3 +188,39 @@ fn version_below_floor_is_one_version_error() {
         );
     }
 }
+
+// ── one verdict: both bindings give the same errors, in the same order ─────
+
+#[test]
+fn every_fixture_gets_the_errors_of_the_python_binding() {
+    let mut stores: Vec<String> = std::fs::read_dir(fixtures())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "zarr"))
+        .map(|p| p.display().to_string())
+        .collect();
+    stores.sort();
+    let python = common::python_errors(&stores);
+    let mut differ = Vec::new();
+    for (store, py) in stores.iter().zip(python) {
+        let rust = zss::check(std::path::Path::new(store)).errors;
+        if rust != py {
+            differ.push(format!("{store}\n  rust:   {rust:?}\n  python: {py:?}"));
+        }
+    }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+#[test]
+fn errors_come_in_the_same_order_on_every_run() {
+    for store in [
+        "l1_bad_skydiff.zarr",
+        "l0_both_groups.zarr",
+        "l1_multi_scan_identity.zarr",
+    ] {
+        let first = zss::check(&fixtures().join(store)).errors;
+        for _ in 0..5 {
+            assert_eq!(zss::check(&fixtures().join(store)).errors, first, "{store}");
+        }
+    }
+}

@@ -52,10 +52,19 @@ from ._store import StoreView, read_store
 _SCAN_PATTERN = "^scan_[0-9]{6,}$"
 _SCAN_RE = re.compile(_SCAN_PATTERN)
 _BAND_RE = re.compile(r"band_[0-9]+")
+# Up to L0 2, frontend b of scan N was a scan of its own, numbered
+# N + 1000000 x b (ADR 0011, the band layout); a leftover is a finding.
+_VIRTUAL_OFFSET = 1_000_000
 _VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
 # RFC 3986 URI reference (ASCII; a % starts a two-hex-digit escape); a leading
 # "/" (absolute path) is excluded: it names a file on one host only.
 _URI_REFERENCE_RE = re.compile(r"(?!/)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+")
+
+
+def _j(value: object) -> str:
+    """A value as JSON (non-ASCII unescaped, keys sorted), as the Rust binding renders it."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
 
 # Spec sections are walked in sorted key order, as the Rust binding's BTreeMaps
 # are, so both bindings report the same findings in the same order.
@@ -184,14 +193,14 @@ def check_view(view: StoreView, spec: dict) -> ValidationResult:
     # A store is exactly one level, marked by which `detect` root attr it carries.
     applicable = {
         name: level
-        for name, level in levels.items()
+        for name, level in sorted(levels.items())
         if level.get("detect") and level["detect"] in view.root_attrs
     }
     if not applicable:
         detects = sorted(level["detect"] for level in levels.values() if level.get("detect"))
         result.errors.append(
             "store declares no known level: none of the detect attributes "
-            f"{detects} are present in root attributes"
+            f"{_j(detects)} are present in root attributes"
         )
         return result
 
@@ -201,17 +210,38 @@ def check_view(view: StoreView, spec: dict) -> ValidationResult:
     applicable_level_names = set(applicable)
     _negotiate_versions(view, spec, applicable_level_names, result)
 
+    # Metadata that did not parse is a structure finding, reported once (under
+    # the first detected level).
+    result.errors.extend(f"[{next(iter(applicable))}] {e}" for e in view.errors)
+    children = _children(view)
     for level_name, level in applicable.items():
-        _check_level(view, level_name, level, result)
+        _check_level(view, children, level_name, level, result)
 
     return result
 
 
-def _check_level(view: StoreView, level_name: str, level: dict, result: ValidationResult) -> None:
-    """Walk one applicable level's structural contract against the store view."""
-    # Metadata that did not parse is a structure finding of this level.
-    result.errors.extend(f"[{level_name}] {e}" for e in view.errors)
+def _children(view: StoreView) -> dict[str, list[str]]:
+    """The paths of the child nodes of each node, sorted (``""`` is the root).
 
+    One index for the whole check, so each lookup costs the children of one
+    node, not the nodes of the store.
+    """
+    children: dict[str, list[str]] = {}
+    for path in (*view.group_attrs, *view.arrays):
+        children.setdefault(path.rpartition("/")[0], []).append(path)
+    for paths in children.values():
+        paths.sort()
+    return children
+
+
+def _check_level(
+    view: StoreView,
+    children: dict[str, list[str]],
+    level_name: str,
+    level: dict,
+    result: ValidationResult,
+) -> None:
+    """Walk one applicable level's structural contract against the store view."""
     # Root attrs declared for this level.
     _check_attrs(view.root_attrs, level.get("root_attrs", {}), "root", level_name, result)
 
@@ -225,24 +255,37 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
         or level.get("scan_or_band_attrs")
         or groups
     )
-    root_children = {p for p in (*view.group_attrs, *view.arrays) if "/" not in p}
-    for name in sorted(root_children):
+    for name in children.get("", []):
         if name.startswith("scan_") and not _SCAN_RE.fullmatch(name):
             result.errors.append(
                 f"[{level_name}] root child '{name}' does not match the scan pattern "
                 f"{_SCAN_PATTERN}"
             )
-    scan_groups = sorted(p for p in view.group_attrs if _SCAN_RE.fullmatch(p))
+        elif name in view.arrays and _SCAN_RE.fullmatch(name):
+            result.errors.append(f"[{level_name}] '{name}' is an array, expected a scan group")
+        elif _SCAN_RE.fullmatch(name) and int(name[5:]) >= _VIRTUAL_OFFSET:
+            base = f"scan_{int(name[5:]) % _VIRTUAL_OFFSET:06d}"
+            if base in view.group_attrs:
+                result.errors.append(
+                    f"[{level_name}] '{name}' is a virtual scan number ({base} + "
+                    f"{_VIRTUAL_OFFSET} x {int(name[5:]) // _VIRTUAL_OFFSET}): a "
+                    "multi-frontend scan holds each band under scan_N/band_B/"
+                )
+    scan_groups = [
+        p for p in children.get("", []) if p in view.group_attrs and _SCAN_RE.fullmatch(p)
+    ]
     if needs_scans and not scan_groups:
         result.errors.append(f"[{level_name}] no scan_<NNNNNN> groups found at the store root")
         return
 
+    placed = {n: g for n, g in sorted(groups.items())}
+    one_of = [n for n in level.get("one_of", []) if n in placed]
     for sg in scan_groups:
-        bands = sorted(
+        bands = [
             p
-            for p in view.group_attrs
-            if p.startswith(f"{sg}/") and _BAND_RE.fullmatch(p[len(sg) + 1 :])
-        )
+            for p in children.get(sg, [])
+            if p in view.group_attrs and _BAND_RE.fullmatch(p[len(sg) + 1 :])
+        ]
 
         # Per-scan-group attrs always checked at the scan group itself.
         _check_attrs(
@@ -253,10 +296,17 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
             result,
         )
 
-        # Multi-frontend: per-band attrs on each band group, and no scan-or-band
-        # attr on the scan group (it belongs on each band).
+        # Multi-frontend: per-band attrs on each band group; the scan group
+        # holds band groups only, and no scan-or-band attr (it belongs on each
+        # band).
         for b in bands:
             _check_attrs(view.group_attrs[b], level.get("band_attrs", {}), b, level_name, result)
+        for node in children.get(sg, []) if bands else ():
+            if node not in bands:
+                result.errors.append(
+                    f"[{level_name}] '{node}' is not a band group: the scan group of a "
+                    "multi-frontend scan holds band groups only"
+                )
         for name in sorted(level.get("scan_or_band_attrs", {})) if bands else ():
             if name in view.group_attrs[sg]:
                 result.errors.append(
@@ -264,12 +314,9 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                     "of a multi-frontend scan, not on the scan group"
                 )
 
-        # `scan` placement resolves to the scan group; `scan_or_band` to the
-        # scan group (single-frontend) or each band (multi-frontend).
-        targets = {"scan": [sg], "scan_or_band": bands or [sg]}
-        # (path, dims, shape) of each array checked, per target.
-        seen: dict[str, list[tuple[str, list[str], list[int]]]] = {}
-        for t in targets["scan_or_band"]:
+        # `scan_or_band` placement resolves to the scan group (single-frontend)
+        # or each band (multi-frontend).
+        for t in bands or [sg]:
             _check_attrs(
                 view.group_attrs[t],
                 level.get("scan_or_band_attrs", {}),
@@ -277,27 +324,24 @@ def _check_level(view: StoreView, level_name: str, level: dict, result: Validati
                 level_name,
                 result,
             )
-        for placement, where in targets.items():
-            placed = {n: g for n, g in sorted(groups.items()) if g.get("placement") == placement}
-            one_of = [n for n in level.get("one_of", []) if n in placed]
-            for t in where:
-                present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
-                if one_of and len(present) != 1:
-                    result.errors.append(
-                        f"[{level_name}] '{t}' must hold exactly one of {one_of}, found {present}"
-                    )
-                for gname, group in placed.items():
-                    if gname in one_of and gname not in present:
-                        continue
-                    _check_group_arrays(
-                        view, t, gname, group, level_name, result, seen.setdefault(t, [])
-                    )
-        for t, arrays in sorted(seen.items()):
-            _check_shared_dims(t, arrays, level_name, result)
+            # (path, dims, shape) of each array checked at this target.
+            seen: list[tuple[str, list[str], list[int]]] = []
+            present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
+            if one_of and len(present) != 1:
+                result.errors.append(
+                    f"[{level_name}] '{t}' must hold exactly one of {_j(one_of)}, "
+                    f"found {_j(present)}"
+                )
+            for gname, group in placed.items():
+                if gname in one_of and gname not in present:
+                    continue
+                _check_group_arrays(view, children, t, gname, group, level_name, result, seen)
+            _check_shared_dims(t, seen, level_name, result)
 
 
 def _check_group_arrays(
     view: StoreView,
+    children: dict[str, list[str]],
     base: str,
     group_name: str,
     group: dict,
@@ -319,11 +363,7 @@ def _check_group_arrays(
             _check_array(view, f"{prefix}/{array_name}", aspec, level_name, result, seen)
             continue
         start = f"{prefix}/{aspec['prefix']}"
-        members = sorted(
-            r
-            for r in (*view.arrays, *view.group_attrs)
-            if r.startswith(start) and "/" not in r[len(prefix) + 1 :]
-        )
+        members = [r for r in children.get(prefix, []) if r.startswith(start)]
         if not members and aspec.get("required", False):
             result.errors.append(f"[{level_name}] required array family '{start}*' is missing")
         for rel in members:
@@ -352,16 +392,14 @@ def _check_array(
     allowed = aspec["dtype"] if isinstance(aspec["dtype"], list) else [aspec["dtype"]]
     if arr.dtype not in allowed:
         result.errors.append(
-            f"[{level_name}] array '{rel}' dtype {json.dumps(arr.dtype)} "
-            f"!= expected {json.dumps(aspec['dtype'])}"
+            f"[{level_name}] array '{rel}' dtype {_j(arr.dtype)} != expected {_j(aspec['dtype'])}"
         )
     if "fill_value" in aspec:
         want, got = aspec["fill_value"], arr.fill_value
         # Exact: an integer, never a float (Zarr v3 writes an integer fill as one).
         if isinstance(got, bool) or not isinstance(got, int) or got != want:
             result.errors.append(
-                f"[{level_name}] array '{rel}' fill_value {json.dumps(got)} "
-                f"!= expected {json.dumps(want)}"
+                f"[{level_name}] array '{rel}' fill_value {_j(got)} != expected {_j(want)}"
             )
     if arr.shape is None:
         result.errors.append(
@@ -373,7 +411,7 @@ def _check_array(
         )
     elif arr.ndim == len(aspec["dims"]):
         seen.append((rel, aspec["dims"], arr.shape))
-    dims = json.dumps(aspec["dims"])
+    dims = _j(aspec["dims"])
     if arr.dimension_names is None:
         result.errors.append(
             f"[{level_name}] array '{rel}' has no dimension_names (expected {dims})"
@@ -381,19 +419,23 @@ def _check_array(
     elif arr.dimension_names != aspec["dims"]:
         result.errors.append(
             f"[{level_name}] array '{rel}' dimension_names "
-            f"{json.dumps(arr.dimension_names)} != expected {dims}"
+            f"{_j(arr.dimension_names)} != expected {dims}"
         )
     if "units" in aspec:
-        units = json.dumps(aspec["units"])
+        units = _j(aspec["units"])
         if "units" not in arr.attrs:
             result.errors.append(
                 f"[{level_name}] array '{rel}' has no units attr (expected {units})"
             )
         elif arr.attrs["units"] != aspec["units"]:
             result.errors.append(
-                f"[{level_name}] array '{rel}' units {json.dumps(arr.attrs['units'])} "
-                f"!= expected {units}"
+                f"[{level_name}] array '{rel}' units {_j(arr.attrs['units'])} != expected {units}"
             )
+    elif "units" in arr.attrs:
+        result.errors.append(
+            f"[{level_name}] array '{rel}' has a units attr {_j(arr.attrs['units'])} "
+            "but declares no unit"
+        )
     _check_attrs(arr.attrs, aspec.get("attrs", {}), rel, level_name, result)
 
 
@@ -450,18 +492,18 @@ def _check_attrs(
         if checker is not None and not checker(attrs[name]):
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be of type "
-                f"{expected!r}, got {attrs[name]!r}"
+                f"{_j(expected)}, got {_j(attrs[name])}"
             )
         elif "enum" in aspec and attrs[name] not in aspec["enum"]:
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be one of "
-                f"{json.dumps(aspec['enum'])}, got {json.dumps(attrs[name])}"
+                f"{_j(aspec['enum'])}, got {_j(attrs[name])}"
             )
         elif "equals" in aspec and attrs[name] != aspec["equals"]:
             # JSON rendering keeps the message identical to the Rust binding's.
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must equal "
-                f"{json.dumps(aspec['equals'])}, got {json.dumps(attrs[name])}"
+                f"{_j(aspec['equals'])}, got {_j(attrs[name])}"
             )
         elif aspec.get("format") == "uri-reference" and not _URI_REFERENCE_RE.fullmatch(
             attrs[name]
@@ -469,7 +511,7 @@ def _check_attrs(
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be a URI reference "
                 f"(RFC 3986) and not an absolute path, got "
-                f"{json.dumps(attrs[name], ensure_ascii=False)}"
+                f"{_j(attrs[name])}"
             )
 
 
@@ -482,7 +524,7 @@ def _negotiate_versions(
     negotiated, so a single-level store is not penalised for lacking the other
     level's version attr.
     """
-    for attr_name, vspec in spec.get("versions", {}).items():
+    for attr_name, vspec in sorted(spec.get("versions", {}).items()):
         if vspec.get("level") not in levels:
             continue
         if attr_name not in view.root_attrs:
@@ -492,12 +534,12 @@ def _negotiate_versions(
         on_disk = vspec["on_disk"]
         if on_disk == "integer" and not _is_int(value):
             result.errors.append(
-                f"root attribute '{attr_name}' must be an integer on disk, got {value!r}"
+                f"root attribute '{attr_name}' must be an integer on disk, got {_j(value)}"
             )
             continue
         if on_disk == "string" and not isinstance(value, str):
             result.errors.append(
-                f"root attribute '{attr_name}' must be a string on disk, got {value!r}"
+                f"root attribute '{attr_name}' must be a string on disk, got {_j(value)}"
             )
             continue
         errors, warnings = _negotiate(attr_name, vspec, value)
@@ -513,7 +555,7 @@ def _negotiate(attr_name: str, vspec: dict, value: object) -> tuple[list[str], l
     """
     store = _parse_version(value)
     if store is None:
-        return ([f"root attribute '{attr_name}': cannot parse version {value!r}"], [])
+        return ([f"root attribute '{attr_name}': cannot parse version {_j(value)}"], [])
     current = _parse_version(vspec["value"])
     floor = _parse_version(vspec["min_supported"])
     assert current is not None and floor is not None  # guaranteed well-formed by the meta-schema

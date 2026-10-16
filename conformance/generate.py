@@ -34,31 +34,13 @@ SPEC = Path(__file__).resolve().parent.parent / "spec" / "schema.yaml"
 # The scan group the fixtures wrap their content in (writer pads to 6 digits).
 _SCAN = "scan_000001"
 
-# The additive L0 identity/provenance scan attrs introduced in #13. A pre-#6
-# store is modelled by omitting exactly these (they are all `required: false`).
+# The L0 identity/provenance attrs introduced in #13. A pre-#6 store is modelled
+# by omitting exactly these; they are required since L0 3, so it is rejected.
 _IDENTITY_L0_ATTRS = {"frontend", "pixels_per_array", "raw_attrs"}
 
-# The required L1 frame set of #19: attrs (scan-or-band, and the site at scan
-# placement) and arrays (scan-or-band, inline).
-FRAME_ATTRS = (
-    "specsys",
-    "veldef",
-    "vlsr_source",
-    "vlsr_source_frame",
-    "ref_channel_base",
-    "coord_frame",
-    "equinox",
-    "projection",
-    "offset_convention",
-    "temperature_scale",
-    "eta_fss",
-    "eta_mb",
-    "gain_el_correction",
-    "sideband_mode",
-    "image_gain",
-    "site_longitude_deg",
-    "site_latitude_deg",
-    "site_altitude_m",
+# The attrs of the required L1 frame set of #19, from the spec list FRAME_ATTRS.
+FRAME_ATTRS = tuple(
+    yaml.safe_load(SPEC.read_text(encoding="utf-8"))["lists"]["FRAME_ATTRS"]
 )
 # Per-band identity of a multi-frontend scan (#34): scan-or-band placement.
 BAND_IDENTITY = ("backend", "obs_id", "spectel1")
@@ -71,6 +53,7 @@ BAD_SHAPES = {
     "negative": [-1],
 }
 
+# The arrays of the required L1 frame set of #19 (scan-or-band, inline).
 FRAME_ARRAYS = (
     "v_frame",
     "ref_lon",
@@ -262,7 +245,7 @@ def emit_l0(
     ``versions`` overrides the on-disk ``l0_schema_version`` (integer axis) for
     the version-negotiation fixtures while the structure stays spec-current.
     ``scan_attr_overrides`` substitutes literal scan-group attr values (for the
-    wrong-typed identity-contract negatives, e.g. ``raw_attrs`` as a string).
+    wrong-typed identity-contract negatives, e.g. ``raw_attrs`` as an integer).
     """
     omit = omit or set()
     omit_attrs = omit_attrs or set()
@@ -500,7 +483,7 @@ def emit_real_output_fixtures(out: Path) -> None:
         out / "l0_bad_scan_name.zarr",
         scans={_SCAN: [one_of[0]], "scan_12": [one_of[0]]},
     )
-    # The optional L0 completeness marker is type-checked (boolean) and holds true.
+    # The L0 completeness marker is type-checked (boolean) and holds true.
     emit_l0(out / "l0_bad_l0_complete.zarr", scan_attr_overrides={"l0_complete": "yes"})
     emit_l0(out / "l0_incomplete.zarr", scan_attr_overrides={"l0_complete": False})
     # calibrate writes the provenance attrs as JSON objects.
@@ -628,8 +611,9 @@ def emit_storage_fixtures(out: Path) -> None:
     emit_l0(out / "l0_bad_fill_value.zarr", array_overrides={counts: {"fill_value": 0}})
 
     # One FITS header per pixel: raw_fits_headers and frontend_backends are
-    # [receiver, array, subscan]. The old [subscan] and [array, subscan] shapes
-    # are errors, and so is a receiver or array length that differs from data_5d.
+    # [receiver, array, subscan]. The [subscan] shape of the older stores and an
+    # [array, subscan] shape are errors, and so is a receiver or array length
+    # that differs from data_5d.
     def _header_override(**over):
         return {
             f"{_SCAN}/source/{n}": over
@@ -777,6 +761,70 @@ def emit_self_description_fixtures(out: Path) -> None:
     )
 
 
+def emit_cleanup_fixtures(out: Path) -> None:
+    """Fixtures for #33 (validator and spec findings of the contract epic).
+
+    Both bindings validate these same stores: the Python tests call this
+    function, the Rust tests run ``main()``.
+    """
+    # A store that carries both detect attrs, below both floors, with one
+    # malformed zarr.json: the version errors come in one order, the parse
+    # error once.
+    store = emit_l1_single(
+        out / "two_levels.zarr", versions={"cal_schema_version": "1.3"}
+    )
+    zarr.open_group(store=str(store), mode="r+").attrs["l0_schema_version"] = 2
+    (store / _SCAN / "t_int" / "zarr.json").write_text("{not json")
+    # An array where a scan group belongs.
+    store = emit_l0(out / "l0_array_at_scan_path.zarr")
+    zarr.open_group(store=str(store), mode="r+").create_array(
+        "scan_000003", shape=(1,), dtype="float64"
+    )
+    # A multi-frontend scan group holds band groups only: an undeclared array
+    # (L1) and a sub-group (L0) there are findings.
+    store = emit_l1_multi(out / "l1_multi_scan_array.zarr")
+    zarr.open_group(store=str(store), mode="r+")[_SCAN].create_array(
+        "spectra", shape=(1,), dtype="float64"
+    )
+    store = emit_l0(out / "l0_multi_scan_group.zarr", n_bands=2)
+    zarr.open_group(store=str(store), mode="r+")[_SCAN].require_group("source")
+    # A leftover virtual scan group of the old layout: scan N + 1000000 x b
+    # beside scan N (ADR 0011, the band layout).
+    emit_l0(
+        out / "l0_virtual_scan.zarr",
+        scans={"scan_029951": ["source"], "scan_1029951": ["source"]},
+    )
+    # An axis name outside the dimension vocabulary.
+    emit_l1_single(
+        out / "l1_dims_outside_vocabulary.zarr",
+        array_overrides={
+            f"{_SCAN}/spectra": {
+                "dims": ["channel", "time", "receiver", "array", "subscan"]
+            }
+        },
+    )
+    # A units attr on an array that declares no unit (flags is a bitmask).
+    emit_l1_single(
+        out / "l1_units_on_flags.zarr",
+        array_overrides={f"{_SCAN}/flags": {"units": ""}},
+    )
+    # Non-ASCII text in a finding: no \\u escape in either binding.
+    emit_l1_single(
+        out / "l1_non_ascii_specsys.zarr", scan_attr_overrides={"specsys": "LSRü"}
+    )
+    # Units compare as strings, exactly (ADR 0012): a spaced spelling of the
+    # gamma unit is a units error.
+    emit_l1_single(
+        out / "l1_gamma_spaced_unit.zarr",
+        array_overrides={f"{_SCAN}/gamma": {"units": "ct / (K s)"}},
+    )
+    # JSON -0 in an integer attr: an integer in both bindings.
+    store = emit_l1_single(out / "l1_negative_zero.zarr")
+    meta = store / _SCAN / "zarr.json"
+    text = meta.read_text(encoding="utf-8")
+    meta.write_text(text.replace('"ref_channel_base": 0', '"ref_channel_base": -0'))
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("usage: python conformance/generate.py <out_dir>", file=sys.stderr)
@@ -799,8 +847,8 @@ def main() -> None:
     print(f"emitted: {out / 'miss_band_index.zarr'}")
 
     # Identity + provenance contract. The post-store (l0.zarr above) carries the
-    # new optional L0 identity attrs; a pre-store omits them and must still
-    # validate green (the fields are optional); wrong-typed values are rejected —
+    # L0 identity attrs; a pre-store omits them and is rejected (required since
+    # L0 3); wrong-typed values are rejected —
     # `raw_attrs` as a scalar (declared object) and the legacy dict form of
     # `pixels_per_array` (declared list-of-lists ⇒ JSON array), which the spec
     # deliberately does NOT admit. The raw_attrs bad value is `42` (no "object"
@@ -819,6 +867,7 @@ def main() -> None:
     emit_real_output_fixtures(out)
     emit_storage_fixtures(out)
     emit_self_description_fixtures(out)
+    emit_cleanup_fixtures(out)
 
     # Version-negotiation fixtures: the cal_schema_version (string-axis) ones ride
     # an L1 store; the l0_schema_version (integer-axis) one rides an L0 store.

@@ -119,26 +119,6 @@ fn one_constant_per_flag_bit_with_the_python_values() {
 // ── 3. scientific frame ────────────────────────────────────────────────────
 
 /// The required L1 frame set: scan-or-band and scan attrs, then arrays.
-const FRAME_ATTRS: &[&str] = &[
-    "specsys",
-    "veldef",
-    "vlsr_source",
-    "vlsr_source_frame",
-    "ref_channel_base",
-    "coord_frame",
-    "equinox",
-    "projection",
-    "offset_convention",
-    "temperature_scale",
-    "eta_fss",
-    "eta_mb",
-    "gain_el_correction",
-    "sideband_mode",
-    "image_gain",
-    "site_longitude_deg",
-    "site_latitude_deg",
-    "site_altitude_m",
-];
 const FRAME_ARRAYS: &[&str] = &[
     "v_frame",
     "ref_lon",
@@ -151,7 +131,7 @@ const FRAME_ARRAYS: &[&str] = &[
 #[test]
 fn scan_without_the_frame_set_names_each_missing_field() {
     let e = errors("l1_no_frame.zarr");
-    let missing: Vec<String> = FRAME_ATTRS
+    let missing: Vec<String> = zss::FRAME_ATTRS
         .iter()
         .map(|n| format!("attribute '{n}' is missing"))
         .chain(

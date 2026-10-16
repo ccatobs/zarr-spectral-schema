@@ -74,7 +74,7 @@ def test_l1_integer_keepbits_is_green(stores):
 def test_l1_non_integer_keepbits_is_rejected(stores):
     errors = zss.validate(stores / "l1_bad_keepbits.zarr")
     assert any(
-        "keepbits" in e and "scan_000001/spectra" in e and "'integer'" in e
+        "keepbits" in e and "scan_000001/spectra" in e and '"integer"' in e
         for e in errors
     ), errors
 

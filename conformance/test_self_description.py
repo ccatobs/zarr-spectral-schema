@@ -197,7 +197,7 @@ def test_l0_fixture_holds_the_site_sentinel_and_is_green(stores):
 def test_sentinel_on_a_field_that_admits_none_is_rejected(stores):
     # eta_fss is the forward efficiency calibrate applied: it always applies.
     errors = zss.validate(stores / "l1_eta_fss_null.zarr")
-    assert any("'eta_fss'" in e and "must be of type 'number'" in e for e in errors), (
+    assert any("'eta_fss'" in e and 'must be of type "number"' in e for e in errors), (
         errors
     )
 

@@ -44,3 +44,25 @@ pub fn fixtures() -> &'static Path {
 pub fn errors(name: &str) -> Vec<String> {
     zarr_spectral_schema::validate(&fixtures().join(name))
 }
+
+/// The Python validator's errors for each store (a path or URL), run in one
+/// subprocess.
+pub fn python_errors(stores: &[String]) -> Vec<Vec<String>> {
+    let out = Command::new("python3")
+        .arg("-c")
+        .arg(
+            "import json, sys\n\
+             import zarr_spectral_schema as zss\n\
+             print(json.dumps([zss.check(u).errors for u in sys.argv[1:]]))",
+        )
+        .args(stores)
+        .env("PYTHONPATH", repo_root().join("bindings/python/src"))
+        .output()
+        .expect("run the Python validator");
+    assert!(
+        out.status.success(),
+        "Python validator failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).unwrap()
+}

@@ -123,8 +123,8 @@
           ]
         },
         "placement": {
-          "description": "Where this group's arrays live relative to a scan group. `scan`: under scan_<N>; `scan_or_band`: under scan_<N> (single-frontend) or each band_<M> (multi-frontend).",
-          "enum": ["scan", "scan_or_band"]
+          "description": "Where this group's arrays live relative to a scan group. `scan_or_band`: under scan_<N> (single-frontend) or each band_<M> (multi-frontend), the only placement.",
+          "enum": ["scan_or_band"]
         },
         "inline": {
           "description": "true ⇒ arrays sit directly in the target dir (no sub-group path segment); false ⇒ under <target>/<groupname>/.",
@@ -194,10 +194,10 @@
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
         "dims": {
-          "description": "Ordered axis names (one per dimension). Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
+          "description": "Ordered axis names (one per dimension), from the dimension vocabulary. Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "$ref": "#/$defs/dimension" }
         },
         "units": {
           "description": "FITS unit string as astropy parses it (\"\" = dimensionless). Producers write it as the array's `units` attr. Omitted for labels, indices, counts of items, strings and bitmasks.",
@@ -222,6 +222,10 @@
           "$ref": "#/$defs/ident"
         }
       }
+    },
+    "dimension": {
+      "description": "The dimension vocabulary: channel (C), dump (D), receiver (R, a pixel of an array), array (A, a frontend-backend pair), subscan (S), and load_dump (the length-1 dump axis of a load-temperature table).",
+      "enum": ["channel", "dump", "receiver", "array", "subscan", "load_dump"]
     },
     "dtype_name": {
       "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "uint32", "bool", "string"]

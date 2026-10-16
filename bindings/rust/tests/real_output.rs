@@ -23,13 +23,15 @@ fn scan_with_only_source_or_only_calibration_is_green() {
 
 #[test]
 fn scan_with_both_or_neither_group_is_rejected() {
-    for name in ["l0_both_groups.zarr", "l0_no_group.zarr"] {
-        let e = errors(name);
-        assert!(
-            e.iter()
-                .any(|m| m.contains("scan_000001") && m.contains("exactly one of")),
-            "{name}: expected a one-of error, got: {e:?}"
+    // The values are quoted as JSON, the same text as in the Python binding.
+    for (name, found) in [
+        ("l0_both_groups.zarr", r#"["source", "calibration"]"#),
+        ("l0_no_group.zarr", "[]"),
+    ] {
+        let want = format!(
+            r#"[L0] 'scan_000001' must hold exactly one of ["source", "calibration"], found {found}"#
         );
+        assert_eq!(errors(name), [want], "{name}");
     }
 }
 
