@@ -91,6 +91,12 @@ scan or band, for example `specsys`, `ref_lon`, `temperature_scale` and
 The L0 count fill value 4294967295 (u32::MAX). A reading equal to it is not a
 valid count (ADR 0013, L0 counts are uint32).
 
+### True-angle offset
+An offset measured as an angle in the projection plane, so it needs no cos(dec)
+division. The per-pixel offsets `pixel_offset_lon` and `pixel_offset_lat` are
+true-angle offsets (ADR 0014, per-pixel offsets are true-angle offsets).
+_Avoid_: cos(dec)-corrected offset, coordinate offset, delta-RA.
+
 ### Count rate
 Counts per second. The base of the L1 `gamma` unit, `ct/(K s)`.
 
