@@ -834,6 +834,18 @@ def emit_cleanup_fixtures(out: Path) -> None:
             out / name,
             array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": bits}}},
         )
+    # Metadata nested 127 levels (serde_json's limit) parses in both bindings;
+    # 128 levels is malformed in both (whole-epic review of PR #36).
+    for depth in (127, 128):
+        store = emit_l1_single(out / f"l1_depth_{depth}.zarr")
+        # The root object and `attributes` are two levels; the rest are lists.
+        nested = "[" * (depth - 2) + "]" * (depth - 2)
+        (store / _SCAN / "t_int" / "zarr.json").write_text(
+            (store / _SCAN / "t_int" / "zarr.json")
+            .read_text(encoding="utf-8")
+            .replace('"attributes": {', f'"attributes": {{"deep": {nested}, ', 1),
+            encoding="utf-8",
+        )
     # JSON -0 in an integer attr: an integer in both bindings.
     store = emit_l1_single(out / "l1_negative_zero.zarr")
     meta = store / _SCAN / "zarr.json"

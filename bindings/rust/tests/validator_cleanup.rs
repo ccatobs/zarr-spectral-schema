@@ -150,3 +150,27 @@ fn check_url_takes_a_string() {
     let local = common::fixtures().join("l1_single.zarr");
     assert!(zarr_spectral_schema::check_url(local.to_str().unwrap()).ok());
 }
+
+// ── findings of the whole-epic review of PR #36 ────────────────────────────
+
+#[test]
+fn metadata_past_127_levels_is_malformed_in_both_bindings() {
+    assert_eq!(errors("l1_depth_127.zarr"), Vec::<String>::new());
+    assert_eq!(
+        errors("l1_depth_128.zarr"),
+        ["[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)"]
+    );
+}
+
+#[cfg(feature = "s3")]
+#[test]
+fn url_without_its_object_store_backend_is_an_error() {
+    // The `s3` feature builds object_store with AWS only.
+    let r = zarr_spectral_schema::check_url("gs://bucket/store.zarr");
+    assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+    assert!(
+        r.errors[0].starts_with("gs://bucket/store.zarr: "),
+        "{:?}",
+        r.errors
+    );
+}

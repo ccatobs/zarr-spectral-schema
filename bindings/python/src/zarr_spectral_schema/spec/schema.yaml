@@ -23,7 +23,8 @@
 # Parse rule (both validators, one grammar): every zarr.json is strict JSON. A
 # non-finite number (NaN, Infinity, -Infinity) is an error of its own
 # ("non-finite number in metadata"); any other zarr.json that does not parse to
-# a JSON object is "malformed metadata". Neither validator raises; the node is
+# a JSON object, or nests more than 127 arrays and objects (the limit of
+# serde_json), is "malformed metadata". Neither validator raises; the node is
 # left out of the walk. data_type may take the string form or the object form
 # ({name: ...}); a node whose node_type differs from the one the spec names is
 # an error. Versions and scan/band names are ASCII digits only. Every structure

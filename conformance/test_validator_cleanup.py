@@ -188,3 +188,35 @@ def test_keepbits_outside_its_range_is_a_finding(stores, name, finding):
     assert errors == [
         f"[L1] attribute 'keepbits' at 'scan_000001/spectra' must be {finding}"
     ]
+
+
+# ── findings of the whole-epic review of PR #36 ────────────────────────────
+
+
+def test_metadata_past_127_levels_is_malformed_in_both_bindings(stores):
+    assert zss.validate(stores / "l1_depth_127.zarr") == []
+    assert zss.validate(stores / "l1_depth_128.zarr") == [
+        "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)"
+    ]
+
+
+def test_url_without_its_fsspec_backend_is_an_error_not_an_exception():
+    # gcsfs is not installed: fsspec raises ImportError, the validator returns it.
+    result = zss.check("gs://bucket/store.zarr")
+    assert len(result.errors) == 1, result.errors
+    assert result.errors[0].startswith("gs://bucket/store.zarr: "), result.errors
+
+
+@pytest.mark.parametrize("name", ["~/m.zarr", "file:m.zarr"])
+def test_local_path_is_taken_as_it_is(tmp_path, monkeypatch, name):
+    # No ~ expansion and no file: stripping: the path the Rust binding reads.
+    generate.emit_l1_single(tmp_path / name, omit={"scan_000001/spectra"})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert zss.validate(name) == [
+        "[L1] required array 'scan_000001/spectra' is missing"
+    ]
+
+
+def test_array_view_ndim_is_none_without_a_shape():
+    assert zss._store.ArrayView("float64", None).ndim is None  # type: ignore[attr-defined]

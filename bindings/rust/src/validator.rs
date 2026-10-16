@@ -967,8 +967,9 @@ impl Backend for Fs {
         let mut children = Vec::new();
         for entry in std::fs::read_dir(dir).map_err(drop)? {
             let entry = entry.map_err(drop)?;
-            // file_type() does not follow a symlink: a symlinked directory is skipped.
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            // file_type() does not follow a symlink: a symlinked directory is
+            // skipped. A failed file_type() fails the listing, never a gap.
+            if entry.file_type().map_err(drop)?.is_dir() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 children.push((name, entry.path()));
             }

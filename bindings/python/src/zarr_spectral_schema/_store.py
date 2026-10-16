@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,7 +55,7 @@ class ArrayView:
     fill_value
         The Zarr v3 ``fill_value`` as parsed. ``None`` when absent.
     ndim
-        The number of dimensions, ``len(shape)``.
+        The number of dimensions, ``len(shape)``; ``None`` when ``shape`` is.
     """
 
     dtype: str
@@ -68,8 +69,8 @@ class ArrayView:
     fill_value: Any = None
 
     @property
-    def ndim(self) -> int:
-        return len(self.shape)
+    def ndim(self) -> int | None:
+        return None if self.shape is None else len(self.shape)
 
 
 @dataclass
@@ -117,10 +118,17 @@ def read_store(store_path: str | Path) -> StoreView:
     store = str(store_path)
     if _URL_RE.match(store):
         # A fresh instance per check: no stale listing, no stale endpoint.
-        fs, root = fsspec.core.url_to_fs(store, skip_instance_cache=True, use_listings_cache=False)
+        try:
+            fs, root = fsspec.core.url_to_fs(
+                store, skip_instance_cache=True, use_listings_cache=False
+            )
+        except ImportError as e:  # the fsspec backend of the scheme is not installed
+            raise ValueError(f"{store}: {e}") from None
         root = unquote(root)
     else:
-        fs, root = fsspec.filesystem("file"), store
+        # Absolute first: fsspec would expand a leading ~ and strip a file:
+        # prefix; the Rust binding takes the path as it is.
+        fs, root = fsspec.filesystem("file"), os.path.abspath(store)
     root = root.rstrip("/")
     root_errors: list[str] = []
     root_meta = _read_node(fs, f"{root}/zarr.json", "zarr.json", root_errors)
@@ -197,13 +205,32 @@ def _read_node(fs, path: str, rel: str, errors: list[str]) -> dict[str, Any] | N
         errors.append(f"'{rel}': non-finite number in metadata")
         return None
     # JSONDecodeError and UnicodeDecodeError are ValueErrors; RecursionError is
-    # metadata nested past the parser's depth (serde_json stops at 128 levels).
+    # metadata nested past the parser's depth.
     except (ValueError, RecursionError):
         meta = None
-    if not isinstance(meta, dict):
+    if not isinstance(meta, dict) or _depth(meta) > _MAX_DEPTH:
         errors.append(f"'{rel}': malformed metadata (not valid JSON)")
         return None
     return meta
+
+
+# serde_json, the parser of the Rust binding, reads at most 127 nested arrays
+# and objects; deeper metadata is malformed in both bindings.
+_MAX_DEPTH = 127
+
+
+def _depth(value: Any) -> int:
+    """The nesting depth of arrays and objects in a parsed JSON value."""
+    depth, level = 0, [value]
+    while level:
+        depth += 1
+        level = [
+            v
+            for c in level
+            for v in (c.values() if isinstance(c, dict) else c)
+            if isinstance(v, (dict, list))
+        ]
+    return depth
 
 
 def _reject_non_finite(token: str) -> float:
