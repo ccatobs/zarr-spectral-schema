@@ -102,7 +102,7 @@ hard constraint on how the DSL is written, not a feature to build.
 
 No change to the Slice-1 tracer. Four constraints carry into later slices:
 
-1. **`placement` (Slice 5, #5) expresses arbitrary hierarchy nesting** —
+1. **`placement` (Slice 5, #5 — full L0+L1 contract) expresses arbitrary hierarchy nesting** —
    `flight → scan → band`, with the multi-frontend scan-or-band rule as one
    property of it — not just the scan-or-band special case. Reserved as a
    commented stub in `spec/schema.yaml` now.
@@ -131,7 +131,8 @@ No change to the Slice-1 tracer. Four constraints carry into later slices:
 ## Amendment 1 (2026-10-14): one writer per store
 
 Status: proposed in ccatobs/zarr-spectral-schema#20 (object storage and
-production volume); the maintainer approves it with the epic PR of #21.
+production volume); the maintainer approves it with the epic PR of
+#21 (production-grade contract epic).
 
 ### Context
 

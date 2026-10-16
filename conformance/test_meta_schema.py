@@ -276,3 +276,10 @@ def test_no_attr_is_declared_at_two_placements():
         sob = set(level.get("scan_or_band_attrs", {}))
         for section in ("scan_attrs", "band_attrs"):
             assert not sob & set(level.get(section, {})), (level_name, section)
+
+
+def test_each_issue_reference_in_the_spec_carries_a_title():
+    # `#19 (title)` or `(#19, title)`: a bare number says nothing to a reader.
+    text = (_ROOT / "spec" / "schema.yaml").read_text(encoding="utf-8")
+    bare = [m.group(0) for m in re.finditer(r"[\w/-]*#\d+(?!\d| \(|, [A-Za-z])", text)]
+    assert bare == [], bare
