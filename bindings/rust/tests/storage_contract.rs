@@ -128,6 +128,7 @@ fn source_l0_store_is_a_uri_reference() {
         ("l1_l0_store_backslash.zarr", false),
         ("l1_l0_store_bad_escape.zarr", false),
         ("l1_l0_store_non_ascii.zarr", false),
+        ("l1_l0_store_file_uri.zarr", false),
     ] {
         let e = errors(name);
         if ok {

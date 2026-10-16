@@ -117,3 +117,36 @@ fn units_compare_as_exact_strings() {
         [r#"[L1] array 'scan_000001/gamma' units "ct / (K s)" != expected "ct/(K s)""#]
     );
 }
+
+// ── 3. object storage input and output ─────────────────────────────────────
+
+#[test]
+fn malformed_metadata_is_a_parse_error_not_a_missing_node() {
+    assert_eq!(
+        errors("l1_malformed_meta.zarr"),
+        ["[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)"]
+    );
+}
+
+#[test]
+fn keepbits_outside_its_range_is_a_finding() {
+    for (name, finding) in [
+        ("l1_keepbits_above.zarr", "<= 52, got 53"),
+        ("l1_keepbits_below.zarr", ">= 0, got -1"),
+    ] {
+        let want = format!("[L1] attribute 'keepbits' at 'scan_000001/spectra' must be {finding}");
+        assert_eq!(errors(name), [want], "{name}");
+    }
+}
+
+#[cfg(not(feature = "s3"))]
+#[test]
+fn check_url_takes_a_string() {
+    let r = zarr_spectral_schema::check_url("s3://zss/l1_single.zarr");
+    assert_eq!(
+        r.errors,
+        ["s3://zss/l1_single.zarr: s3:// needs the `s3` feature"]
+    );
+    let local = common::fixtures().join("l1_single.zarr");
+    assert!(zarr_spectral_schema::check_url(local.to_str().unwrap()).ok());
+}

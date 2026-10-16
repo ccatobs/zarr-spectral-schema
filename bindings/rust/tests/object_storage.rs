@@ -109,6 +109,27 @@ fn validators_on_object_storage() {
     s3_verdict_matches_the_local_and_the_python_verdict(&mut s3);
     validator_reads_only_zarr_json_objects(&mut s3);
     unreadable_node_is_an_error_in_both_bindings(&mut s3);
+    check_inside_a_tokio_runtime_returns_a_result();
+    check_url_takes_a_url_string();
+}
+
+/// #33: a caller inside a tokio runtime gets a result, not a panic.
+fn check_inside_a_tokio_runtime_returns_a_result() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let r = rt.block_on(async { zss::check(Path::new(&url("l1_single.zarr"))) });
+    assert_eq!(r.errors, Vec::<String>::new());
+}
+
+/// #33: `check_url` takes the URL as a string and gives the verdict of `check`.
+fn check_url_takes_a_url_string() {
+    let u = url("miss_array.zarr");
+    assert_eq!(zss::check_url(&u).errors, zss::check(Path::new(&u)).errors);
+    assert_eq!(
+        zss::check_url(&u).errors,
+        ["[L1] required array 'scan_000001/spectra' is missing"]
+    );
 }
 
 fn url(name: &str) -> String {
@@ -168,10 +189,8 @@ const DENY_CASES: &[(&str, &str, &[&str])] = &[
     (
         "l1_single.zarr",
         "l1_single.zarr/scan_000001/t_int/zarr.json",
-        &[
-            "[L1] 'scan_000001/t_int/zarr.json': cannot read metadata",
-            "[L1] required array 'scan_000001/t_int' is missing",
-        ],
+        // The node exists: no missing-node error beside the read error (#33).
+        &["[L1] 'scan_000001/t_int/zarr.json': cannot read metadata"],
     ),
     ("l1_single.zarr", "l1_single.zarr/", &["'/': cannot list"]),
     (

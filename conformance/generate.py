@@ -562,6 +562,8 @@ SOURCE_L0_STORE_FIXTURES: dict[str, tuple[str, bool]] = {
     "l1_l0_store_backslash.zarr": ("..\\zarr\\x.zarr", False),
     "l1_l0_store_bad_escape.zarr": ("../zarr/x%zz.zarr", False),
     "l1_l0_store_non_ascii.zarr": ("../zarr/m\u00fcnchen.zarr", False),
+    # A file: URI names a file on one host, as an absolute path does (#33).
+    "l1_l0_store_file_uri.zarr": ("file:///data/zarr/x.zarr", False),
 }
 
 
@@ -818,6 +820,12 @@ def emit_cleanup_fixtures(out: Path) -> None:
         out / "l1_gamma_spaced_unit.zarr",
         array_overrides={f"{_SCAN}/gamma": {"units": "ct / (K s)"}},
     )
+    # keepbits counts kept mantissa bits: 0 to 52 (float64).
+    for name, bits in (("l1_keepbits_above.zarr", 53), ("l1_keepbits_below.zarr", -1)):
+        emit_l1_single(
+            out / name,
+            array_overrides={f"{_SCAN}/spectra": {"attr_values": {"keepbits": bits}}},
+        )
     # JSON -0 in an integer attr: an integer in both bindings.
     store = emit_l1_single(out / "l1_negative_zero.zarr")
     meta = store / _SCAN / "zarr.json"

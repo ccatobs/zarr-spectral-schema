@@ -87,6 +87,9 @@ class StoreView:
     errors
         Parse errors of non-root ``zarr.json`` files. A node that does not parse
         is left out of the view together with its subtree.
+    unknown
+        The paths of the nodes left out that way, and of each group that cannot
+        be listed: the validator reports no node at or below them as missing.
     """
 
     root_attrs: dict[str, Any]
@@ -95,6 +98,7 @@ class StoreView:
     arrays: dict[str, ArrayView] = field(default_factory=dict)
     # metadata parse errors of non-root nodes, e.g. "'scan_000001/zarr.json': ..."
     errors: list[str] = field(default_factory=list)
+    unknown: set[str] = field(default_factory=set)
 
 
 class _NonFinite(Exception):
@@ -150,7 +154,10 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
     )
     for name in names:
         child = f"{rel}/{name}" if rel else name
+        failed = len(view.errors)
         meta = _read_node(fs, f"{root}/{child}/zarr.json", f"{child}/zarr.json", view.errors)
+        if len(view.errors) > failed:
+            view.unknown.add(child)
         if meta is None:
             continue
         if meta.get("node_type") == "array":
@@ -167,12 +174,14 @@ def _walk(fs, root: str, rel: str, view: StoreView) -> None:
                 _walk(fs, root, child, view)
             except ValueError as e:
                 view.errors.append(str(e))
+                view.unknown.add(child)
 
 
 def _read_node(fs, path: str, rel: str, errors: list[str]) -> dict[str, Any] | None:
     """Parse one ``zarr.json``; ``None`` when absent; on failure append the error naming ``rel``."""
     try:
-        raw = fs.cat_file(path)
+        # start=0: one ranged GET on object storage, with no HEAD before it.
+        raw = fs.cat_file(path, start=0)
     except FileNotFoundError:
         return None
     except Exception:  # noqa: BLE001 - any filesystem failure; botocore errors are not OSError

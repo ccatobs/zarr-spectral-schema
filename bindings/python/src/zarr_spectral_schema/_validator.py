@@ -57,8 +57,10 @@ _BAND_RE = re.compile(r"band_[0-9]+")
 _VIRTUAL_OFFSET = 1_000_000
 _VERSION_RE = re.compile(r"[0-9]+(\.[0-9]+)?")
 # RFC 3986 URI reference (ASCII; a % starts a two-hex-digit escape); a leading
-# "/" (absolute path) is excluded: it names a file on one host only.
-_URI_REFERENCE_RE = re.compile(r"(?!/)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+")
+# "/" (absolute path) and a file: URI are excluded: they name a file on one host.
+_URI_REFERENCE_RE = re.compile(
+    r"(?!/)(?![Ff][Ii][Ll][Ee]:)(?:[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+"
+)
 
 
 def _j(value: object) -> str:
@@ -326,7 +328,9 @@ def _check_level(
             )
             # (path, dims, shape) of each array checked at this target.
             seen: list[tuple[str, list[str], list[int]]] = []
-            present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
+            present = [
+                n for n in one_of if f"{t}/{n}" in view.group_attrs or f"{t}/{n}" in view.unknown
+            ]
             if one_of and len(present) != 1:
                 result.errors.append(
                     f"[{level_name}] '{t}' must hold exactly one of {_j(one_of)}, "
@@ -386,7 +390,7 @@ def _check_array(
         return
     arr = view.arrays.get(rel)
     if arr is None:
-        if aspec.get("required", False):
+        if aspec.get("required", False) and not _unknown(view, rel):
             result.errors.append(f"[{level_name}] required array '{rel}' is missing")
         return
     allowed = aspec["dtype"] if isinstance(aspec["dtype"], list) else [aspec["dtype"]]
@@ -437,6 +441,13 @@ def _check_array(
             "but declares no unit"
         )
     _check_attrs(arr.attrs, aspec.get("attrs", {}), rel, level_name, result)
+
+
+def _unknown(view: StoreView, rel: str) -> bool:
+    """True when the node at ``rel``, or a group above it, was left out of the
+    view: its metadata did not parse or could not be read or listed."""
+    parts = rel.split("/")
+    return any("/".join(parts[:i]) in view.unknown for i in range(1, len(parts) + 1))
 
 
 def _check_shared_dims(
@@ -499,6 +510,16 @@ def _check_attrs(
                 f"[{level_name}] attribute '{name}' at '{where}' must be one of "
                 f"{_j(aspec['enum'])}, got {_j(attrs[name])}"
             )
+        elif "minimum" in aspec and attrs[name] < aspec["minimum"]:
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must be "
+                f">= {_j(aspec['minimum'])}, got {_j(attrs[name])}"
+            )
+        elif "maximum" in aspec and attrs[name] > aspec["maximum"]:
+            result.errors.append(
+                f"[{level_name}] attribute '{name}' at '{where}' must be "
+                f"<= {_j(aspec['maximum'])}, got {_j(attrs[name])}"
+            )
         elif "equals" in aspec and attrs[name] != aspec["equals"]:
             # JSON rendering keeps the message identical to the Rust binding's.
             result.errors.append(
@@ -510,7 +531,7 @@ def _check_attrs(
         ):
             result.errors.append(
                 f"[{level_name}] attribute '{name}' at '{where}' must be a URI reference "
-                f"(RFC 3986) and not an absolute path, got "
+                f"(RFC 3986), not an absolute path and not a file: URI, got "
                 f"{_j(attrs[name])}"
             )
 

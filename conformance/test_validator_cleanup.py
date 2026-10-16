@@ -163,3 +163,28 @@ def test_units_compare_as_exact_strings(stores):
     assert errors == [
         '[L1] array \'scan_000001/gamma\' units "ct / (K s)" != expected "ct/(K s)"'
     ]
+
+
+# ── 3. object storage input and output ─────────────────────────────────────
+
+
+def test_malformed_metadata_is_a_parse_error_not_a_missing_node(tmp_path):
+    store = generate.emit_l1_single(tmp_path / "l1.zarr")
+    (store / "scan_000001" / "t_int" / "zarr.json").write_text("{not json")
+    assert zss.validate(store) == [
+        "[L1] 'scan_000001/t_int/zarr.json': malformed metadata (not valid JSON)"
+    ]
+
+
+@pytest.mark.parametrize(
+    "name, finding",
+    [
+        ("l1_keepbits_above.zarr", "<= 52, got 53"),
+        ("l1_keepbits_below.zarr", ">= 0, got -1"),
+    ],
+)
+def test_keepbits_outside_its_range_is_a_finding(stores, name, finding):
+    errors = zss.validate(stores / name)
+    assert errors == [
+        f"[L1] attribute 'keepbits' at 'scan_000001/spectra' must be {finding}"
+    ]

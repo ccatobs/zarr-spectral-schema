@@ -176,6 +176,13 @@ def test_real_spec_passes_meta_schema():
             ].__setitem__("dims", ["time"]),
             id="dims-outside-vocabulary",
         ),
+        # A bound constrains a number or an integer, nothing else.
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["line"].__setitem__(
+                "minimum", 0
+            ),
+            id="bound-on-string-attr",
+        ),
     ],
 )
 def test_malformed_spec_is_rejected(mutate):

@@ -39,7 +39,7 @@
 //! `validate` returns errors only (back-compat); `check` returns the full
 //! [`ValidationResult`] with warnings.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -94,6 +94,11 @@ struct AttrSpec {
     /// Value set: the attr holds one of these values.
     #[serde(default)]
     r#enum: Option<Vec<Value>>,
+    /// Inclusive bounds of a number or integer attr.
+    #[serde(default)]
+    minimum: Option<serde_json::Number>,
+    #[serde(default)]
+    maximum: Option<serde_json::Number>,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +181,10 @@ struct StoreView {
     arrays: BTreeMap<String, ArrayMeta>,
     /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
     errors: Vec<String>,
+    /// Nodes left out because their metadata did not parse or could not be
+    /// read, and groups that cannot be listed: no node at or below them is
+    /// reported missing.
+    unknown: BTreeSet<String>,
 }
 
 /// One array node of the view (parity with the Python `ArrayView`).
@@ -211,8 +220,9 @@ pub fn validate(store: &Path) -> Vec<String> {
 /// `store` is a local path or, with the `s3` feature, a URL
 /// (`Path::new("s3://bucket/store.zarr")`). An S3 store takes its endpoint,
 /// region and credentials from the standard `AWS_*` environment variables; its
-/// check blocks on a runtime of its own, so do not call it from inside a tokio
-/// runtime. A local check reads with `std::fs` and needs no runtime.
+/// check blocks on a runtime of its own, on a thread of its own, so a caller
+/// inside a tokio runtime may call it too. A local check reads with `std::fs`
+/// and needs no runtime.
 ///
 /// The check reads `zarr.json` objects only, never a chunk. It accepts the
 /// current major version of each level (L0 3, L1 2.0); a store below
@@ -272,6 +282,14 @@ pub fn check(store: &Path) -> ValidationResult {
     }
 
     result
+}
+
+/// [`check`] for a store named by a string: a URL (`s3://bucket/store.zarr`,
+/// with the `s3` feature) or a local path, the same grammar. A caller that
+/// holds a URL need not wrap it in a `Path`, which joins and canonicalizes as a
+/// file path.
+pub fn check_url(store: &str) -> ValidationResult {
+    check(Path::new(store))
 }
 
 /// The child node paths of each node, sorted (`""` is the root): one index for
@@ -409,7 +427,10 @@ fn check_level(
             let present: Vec<&String> = one_of
                 .iter()
                 .copied()
-                .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
+                .filter(|n| {
+                    let path = format!("{t}/{n}");
+                    view.groups.contains_key(&path) || view.unknown.contains(&path)
+                })
                 .collect();
             if !one_of.is_empty() && present.len() != 1 {
                 result.errors.push(format!(
@@ -427,6 +448,15 @@ fn check_level(
             check_shared_dims(t, &seen, level_name, result);
         }
     }
+}
+
+/// True when the node at `rel`, or a group above it, was left out of the
+/// view: its metadata did not parse or could not be read or listed.
+fn unknown(view: &StoreView, rel: &str) -> bool {
+    rel.match_indices('/')
+        .map(|(i, _)| &rel[..i])
+        .chain([rel])
+        .any(|p| view.unknown.contains(p))
 }
 
 /// One checked array: (store path, declared dims, on-disk shape).
@@ -540,7 +570,7 @@ fn check_array(
         return;
     }
     let Some(arr) = view.arrays.get(rel) else {
-        if aspec.required {
+        if aspec.required && !unknown(view, rel) {
             result
                 .errors
                 .push(format!("[{level_name}] required array '{rel}' is missing"));
@@ -682,6 +712,16 @@ fn check_attrs(
                 json(&Value::Array(set.clone())),
                 json(value)
             ));
+        } else if let Some(min) = aspec.minimum.as_ref().filter(|m| compare(value, m).is_lt()) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be >= {min}, got {}",
+                json(value)
+            ));
+        } else if let Some(max) = aspec.maximum.as_ref().filter(|m| compare(value, m).is_gt()) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be <= {max}, got {}",
+                json(value)
+            ));
         } else if let Some(equals) = aspec.equals.as_ref().filter(|e| !same(e, value)) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must equal {}, got {}",
@@ -693,7 +733,7 @@ fn check_attrs(
         {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must be a URI reference \
-                 (RFC 3986) and not an absolute path, got {}",
+                 (RFC 3986), not an absolute path and not a file: URI, got {}",
                 json(value)
             ));
         }
@@ -709,6 +749,16 @@ fn same(a: &Value, b: &Value) -> bool {
         }
         _ => a == b,
     }
+}
+
+/// A JSON number against a bound (`Equal` when it is not a number: the type
+/// check reports that).
+fn compare(value: &Value, bound: &serde_json::Number) -> std::cmp::Ordering {
+    value
+        .as_f64()
+        .zip(bound.as_f64())
+        .and_then(|(v, b)| v.partial_cmp(&b))
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// The not-applicable sentinel of an attr type: "NONE" or JSON null.
@@ -838,12 +888,16 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
 }
 
 /// An RFC 3986 URI reference (ASCII; a `%` starts a two-hex-digit escape), not
-/// empty and not an absolute path: a leading `/` names a file on one host only.
+/// empty, not an absolute path and not a `file:` URI: those name a file on one
+/// host only.
 /// Parity with the Python `_URI_REFERENCE_RE`.
 fn is_uri_reference(value: &str) -> bool {
     let allowed = |c: u8| c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c);
     let mut rest = value.as_bytes();
-    if rest.is_empty() || rest[0] == b'/' {
+    let file_uri = rest
+        .get(..5)
+        .is_some_and(|p| p.eq_ignore_ascii_case(b"file:"));
+    if rest.is_empty() || rest[0] == b'/' || file_uri {
         return false;
     }
     while let Some((&c, tail)) = rest.split_first() {
@@ -1017,8 +1071,16 @@ fn read_store(store: &Path) -> Result<StoreView, String> {
         None => read_with(&Fs, store.to_path_buf(), store),
         #[cfg(feature = "s3")]
         Some(url) => {
-            let (backend, root) = Obj::open(url)?;
-            read_with(&backend, root, store)
+            // A thread of its own: a runtime cannot block inside the runtime of
+            // a caller.
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let (backend, root) = Obj::open(url)?;
+                    read_with(&backend, root, store)
+                })
+                .join()
+                .unwrap_or_else(|p| std::panic::resume_unwind(p))
+            })
         }
         #[cfg(not(feature = "s3"))]
         Some(_) => Err(format!("{}: s3:// needs the `s3` feature", store.display())),
@@ -1060,13 +1122,17 @@ fn walk<B: Backend>(
             format!("{rel}/{name}")
         };
         match read_meta(backend, &child, &format!("{rel}/zarr.json")) {
-            Err(e) => view.errors.push(e),
+            Err(e) => {
+                view.errors.push(e);
+                view.unknown.insert(rel);
+            }
             Ok(None) => {}
             Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
                 Some("group") => {
                     view.groups.insert(rel.clone(), attributes(&meta));
                     if let Err(e) = walk(backend, &child, &rel, view) {
                         view.errors.push(e);
+                        view.unknown.insert(rel);
                     }
                 }
                 Some("array") => {

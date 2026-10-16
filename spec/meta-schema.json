@@ -146,8 +146,16 @@
       "type": "object",
       "required": ["type", "required"],
       "additionalProperties": false,
-      "if": { "required": ["format"] },
-      "then": { "properties": { "type": { "const": "string" } } },
+      "allOf": [
+        {
+          "if": { "required": ["format"] },
+          "then": { "properties": { "type": { "const": "string" } } }
+        },
+        {
+          "if": { "anyOf": [{ "required": ["minimum"] }, { "required": ["maximum"] }] },
+          "then": { "properties": { "type": { "enum": ["integer", "number"] } } }
+        }
+      ],
       "properties": {
         "type": {
           "description": "JSON value type the attribute is encoded as.",
@@ -163,8 +171,16 @@
           "type": ["string", "integer", "number", "boolean"]
         },
         "format": {
-          "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty and never an absolute path.",
+          "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty, never an absolute path and never a file: URI.",
           "enum": ["uri-reference"]
+        },
+        "minimum": {
+          "description": "Inclusive lower bound of a `type: integer` or `type: number` attr.",
+          "type": "number"
+        },
+        "maximum": {
+          "description": "Inclusive upper bound of a `type: integer` or `type: number` attr.",
+          "type": "number"
         },
         "enum": {
           "description": "Value set: when present on disk, the attribute holds one of these values (or its not-applicable sentinel when `sentinel` is true).",
