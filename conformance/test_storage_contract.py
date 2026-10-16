@@ -8,6 +8,7 @@ same checks over the same stores (bindings/rust/tests/storage_contract.rs).
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -136,6 +137,9 @@ def test_unlistable_local_group_is_an_error(tmp_path):
     )
     skydiff = store / "scan_000001" / "skydiff"
     skydiff.chmod(0o311)  # no read: the directory cannot be listed
+    if os.access(skydiff, os.R_OK):  # root lists it anyway: the case cannot arise
+        skydiff.chmod(0o755)
+        pytest.skip("a 0311 directory is listable (running as root)")
     try:
         errors = zss.validate(store)
     finally:

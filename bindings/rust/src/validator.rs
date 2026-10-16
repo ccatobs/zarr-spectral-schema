@@ -516,7 +516,10 @@ fn check_array(
         let want = Value::Number(want.clone());
         // Exact: serde_json numbers differ by kind, so 4294967295.0 is not 4294967295.
         if arr.fill_value.as_ref() != Some(&want) {
-            let got = arr.fill_value.as_ref().map_or("null".to_string(), Value::to_string);
+            let got = arr
+                .fill_value
+                .as_ref()
+                .map_or("null".to_string(), Value::to_string);
             result.errors.push(format!(
                 "[{level_name}] array '{rel}' fill_value {got} != expected {want}"
             ));

@@ -4,32 +4,9 @@
 //! `emit_storage_fixtures` set) and checks each verdict. The Python binding
 //! runs the same checks over the same stores (conformance/test_storage_contract.py).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
+mod common;
 
-use zarr_spectral_schema as zss;
-
-/// Emit the fixtures once per test binary with the shared spec-driven generator.
-fn fixtures() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let out = std::env::temp_dir().join(format!("zss_rust_storage_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&out);
-        let status = Command::new("python3")
-            .arg(root.join("conformance/generate.py"))
-            .arg(&out)
-            .status()
-            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-        assert!(status.success(), "generator failed");
-        out
-    })
-}
-
-fn errors(name: &str) -> Vec<String> {
-    zss::validate(&fixtures().join(name))
-}
+use common::{errors, fixtures};
 
 // ── 1. chunk independence ──────────────────────────────────────────────────
 
@@ -189,6 +166,12 @@ fn unlistable_local_group_is_an_error() {
     let skydiff = fixtures().join("l1_bad_skydiff.zarr/scan_000001/skydiff");
     let mode = |m| std::fs::Permissions::from_mode(m);
     std::fs::set_permissions(&skydiff, mode(0o311)).unwrap(); // no read: cannot list
+    if std::fs::read_dir(&skydiff).is_ok() {
+        // Root lists the directory anyway: the case cannot arise, so skip.
+        std::fs::set_permissions(&skydiff, mode(0o755)).unwrap();
+        eprintln!("skipped: a 0311 directory is listable (running as root)");
+        return;
+    }
     let e = errors("l1_bad_skydiff.zarr");
     std::fs::set_permissions(&skydiff, mode(0o755)).unwrap();
     assert_eq!(e, ["[L1] 'scan_000001/skydiff/': cannot list"]);
@@ -197,7 +180,7 @@ fn unlistable_local_group_is_an_error() {
 #[cfg(not(feature = "s3"))]
 #[test]
 fn url_without_the_s3_feature_is_an_explicit_error() {
-    let e = zss::validate(Path::new("s3://zss/l1_single.zarr"));
+    let e = zarr_spectral_schema::validate(std::path::Path::new("s3://zss/l1_single.zarr"));
     assert_eq!(e, ["s3://zss/l1_single.zarr: s3:// needs the `s3` feature"]);
 }
 

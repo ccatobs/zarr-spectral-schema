@@ -10,8 +10,10 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
 
+mod common;
+
+use common::{fixtures, repo_root};
 use serde_json::Value;
 use zarr_spectral_schema as zss;
 
@@ -54,24 +56,12 @@ impl S3 {
     }
 }
 
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// Emit the fixtures, start the S3 helper once, point the AWS environment at it.
-/// Tests hold the lock for their whole body, so the request log is theirs alone.
-fn s3() -> &'static Mutex<S3> {
-    static S3: OnceLock<Mutex<S3>> = OnceLock::new();
-    S3.get_or_init(|| {
-        let out = std::env::temp_dir().join(format!("zss_rust_s3_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&out);
-        let status = Command::new("python3")
-            .arg(root().join("conformance/generate.py"))
-            .arg(&out)
-            .status()
-            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-        assert!(status.success(), "generator failed");
-        let real = root().join("conformance/real_stores");
+impl S3 {
+    /// Start the S3 helper over the generated and the real stores, and point
+    /// the AWS environment at it.
+    fn start() -> Self {
+        let out = fixtures();
+        let real = repo_root().join("conformance/real_stores");
         let mut stores: Vec<(String, PathBuf)> = GENERATED
             .iter()
             .map(|n| out.join(n))
@@ -80,7 +70,7 @@ fn s3() -> &'static Mutex<S3> {
             .collect();
         stores.push((SPACED.to_string(), out.join("l1_single.zarr")));
         let mut child = Command::new("python3")
-            .arg(root().join("conformance/s3_server.py"))
+            .arg(repo_root().join("conformance/s3_server.py"))
             .args(stores.iter().map(|(n, p)| format!("{n}={}", p.display())))
             .arg(out.join(BAD_SKYDIFF))
             .stdin(Stdio::piped())
@@ -92,6 +82,8 @@ fn s3() -> &'static Mutex<S3> {
         let mut line = String::new();
         stdout.read_line(&mut line).unwrap();
         let hello: Value = serde_json::from_str(&line).expect("s3_server.py hello line");
+        // Safe: this binary holds one test, so no other thread reads the
+        // environment while it changes.
         for (k, v) in hello["env"].as_object().unwrap() {
             std::env::set_var(k, v.as_str().unwrap());
         }
@@ -100,13 +92,23 @@ fn s3() -> &'static Mutex<S3> {
             "ZSS_NOT_UTF8",
             <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"\xff"),
         );
-        Mutex::new(S3 {
+        S3 {
             _child: child,
             stdin,
             stdout,
             stores,
-        })
-    })
+        }
+    }
+}
+
+/// The only test of this binary: it sets the AWS environment, which is safe
+/// only while no other test thread runs. Each step is one former test.
+#[test]
+fn validators_on_object_storage() {
+    let mut s3 = S3::start();
+    s3_verdict_matches_the_local_and_the_python_verdict(&mut s3);
+    validator_reads_only_zarr_json_objects(&mut s3);
+    unreadable_node_is_an_error_in_both_bindings(&mut s3);
 }
 
 fn url(name: &str) -> String {
@@ -123,7 +125,7 @@ fn python_errors(urls: &[String]) -> Vec<Vec<String>> {
              print(json.dumps([zss.check(u).errors for u in sys.argv[1:]]))",
         )
         .args(urls)
-        .env("PYTHONPATH", root().join("bindings/python/src"))
+        .env("PYTHONPATH", repo_root().join("bindings/python/src"))
         .output()
         .expect("run the Python validator");
     assert!(
@@ -134,9 +136,7 @@ fn python_errors(urls: &[String]) -> Vec<Vec<String>> {
     serde_json::from_slice(&out.stdout).unwrap()
 }
 
-#[test]
-fn s3_verdict_matches_the_local_and_the_python_verdict() {
-    let s3 = s3().lock().unwrap();
+fn s3_verdict_matches_the_local_and_the_python_verdict(s3: &mut S3) {
     let urls: Vec<String> = s3.stores.iter().map(|(n, _)| url(n)).collect();
     let python = python_errors(&urls);
     for ((name, local), py) in s3.stores.iter().zip(python) {
@@ -158,9 +158,7 @@ fn s3_verdict_matches_the_local_and_the_python_verdict() {
     }
 }
 
-#[test]
-fn validator_reads_only_zarr_json_objects() {
-    let mut s3 = s3().lock().unwrap();
+fn validator_reads_only_zarr_json_objects(s3: &mut S3) {
     s3.requests();
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"] {
         // Every node read, and every store green.
@@ -204,9 +202,7 @@ const DENY_CASES: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
-#[test]
-fn unreadable_node_is_an_error_in_both_bindings() {
-    let mut s3 = s3().lock().unwrap();
+fn unreadable_node_is_an_error_in_both_bindings(s3: &mut S3) {
     for (name, deny, expected) in DENY_CASES {
         s3.send(&format!("deny {deny}"));
         let rust = zss::check(Path::new(&url(name))).errors;

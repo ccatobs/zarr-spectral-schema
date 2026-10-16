@@ -4,32 +4,10 @@
 //! `emit_real_output_fixtures` set) and checks each verdict. The Python binding
 //! runs the same checks over the same stores (conformance/test_real_output.py).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
+mod common;
 
+use common::{errors, fixtures};
 use zarr_spectral_schema as zss;
-
-/// Emit the fixtures once per test binary with the shared spec-driven generator.
-fn fixtures() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let out = std::env::temp_dir().join(format!("zss_rust_real_output_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&out);
-        let status = Command::new("python3")
-            .arg(root.join("conformance/generate.py"))
-            .arg(&out)
-            .status()
-            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-        assert!(status.success(), "generator failed");
-        out
-    })
-}
-
-fn errors(name: &str) -> Vec<String> {
-    zss::validate(&fixtures().join(name))
-}
 
 // ── 1. a scan holds exactly one of the source group and the calibration group ──
 

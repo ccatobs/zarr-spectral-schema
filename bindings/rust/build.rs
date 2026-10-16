@@ -65,7 +65,11 @@ fn main() {
                 match group.get("const") {
                     Some(Value::Bool(false)) => {} // structural group: emit no const
                     Some(Value::String(ident)) => add_scalar(&mut consts, ident.clone(), gname),
-                    _ => add_scalar(&mut consts, format!("{}_GROUP", gname.to_uppercase()), gname),
+                    _ => add_scalar(
+                        &mut consts,
+                        format!("{}_GROUP", gname.to_uppercase()),
+                        gname,
+                    ),
                 }
                 let Some(arrays) = group.get("arrays").and_then(Value::as_mapping) else {
                     continue;
@@ -120,7 +124,10 @@ fn main() {
                 .collect();
             let decl = format!("pub const {name}: &[&str] = &[{}];", items.join(", "));
             if let Some(existing) = consts.get(&name) {
-                assert_eq!(existing, &decl, "const {name} declared with conflicting values");
+                assert_eq!(
+                    existing, &decl,
+                    "const {name} declared with conflicting values"
+                );
             }
             consts.insert(name, decl);
         }
