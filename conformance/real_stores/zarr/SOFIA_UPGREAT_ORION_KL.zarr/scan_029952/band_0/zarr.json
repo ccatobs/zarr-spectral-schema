@@ -5,11 +5,17 @@
     "line": "OI_63_L",
     "rest_freq_hz": 4744777490000.0,
     "frontend": "HFA",
+    "arrays": [
+      "HFAV"
+    ],
     "pixels_per_array": [
       [
         "PX00_S"
       ]
     ],
+    "backend": "HFAV_PX00_S",
+    "obs_id": "2018-12-18_GR_F541_HFAV_PX00_S_029952_001",
+    "spectel1": "GRE_HFA",
     "raw_attrs": {
       "fits_version": "2.12",
       "pixel_offset_method": "direct",

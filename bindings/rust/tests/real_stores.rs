@@ -1,7 +1,7 @@
 //! Real producer output is read cleanly (Rust binding) — #18, #19.
 //!
 //! The stores under `conformance/real_stores/` are producer output of
-//! ccatobs/kalibrate `epic/21` at 5bf7c7b: zarr-fits wrote L0 3, calibrate wrote
+//! ccatobs/kalibrate `epic/zss-38` at 53e8e8b: zarr-fits wrote L0 3, calibrate wrote
 //! L1 2.0 (see real_stores/README.md). Each store validates with zero findings.
 //! A missing store fails the test; it never returns early. The Python binding
 //! validates the same stores (conformance/test_real_stores.py).
@@ -19,7 +19,6 @@ const REAL_STORES: &[&str] = &[
 ];
 
 #[test]
-#[ignore = "the real stores predate #34 (L0 arrays, per-band identity, image_gain); ccatobs/zarr-spectral-schema#37 writes them again"]
 fn real_stores_have_zero_findings() {
     let real = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/real_stores");
     for name in REAL_STORES {

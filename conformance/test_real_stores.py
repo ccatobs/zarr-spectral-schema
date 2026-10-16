@@ -1,7 +1,7 @@
 """Real producer output is read cleanly (Python binding) — #18, #19.
 
 The stores under ``conformance/real_stores/`` are producer output of
-ccatobs/kalibrate ``epic/21`` at 5bf7c7b: zarr-fits wrote L0 3, calibrate wrote
+ccatobs/kalibrate ``epic/zss-38`` at 53e8e8b: zarr-fits wrote L0 3, calibrate wrote
 L1 2.0 (see real_stores/README.md). Each store validates with zero findings. A
 missing store fails the test; it never skips. The Rust binding validates the
 same stores (bindings/rust/tests/real_stores.rs).
@@ -33,10 +33,6 @@ REAL_STORES = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the real stores predate #34 (L0 arrays, per-band identity, image_gain); ccatobs/zarr-spectral-schema#37 writes them again",
-)
 @pytest.mark.parametrize("name", REAL_STORES)
 def test_real_store_has_zero_findings(name):
     store = REAL / name

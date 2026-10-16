@@ -30,8 +30,6 @@ const BAD_SKYDIFF: &str = "l1_bad_skydiff.zarr";
 /// A store under a key with a space, read through its `%20` URL.
 const SPACED: &str = "my store.zarr";
 const REAL: &[&str] = &["calibrate/ORION_KL", "zarr/SOFIA_UPGREAT_ORION_KL.zarr"];
-/// Real stores that are not green until #37: the real stores predate #34 (L0 arrays, per-band identity, image_gain); ccatobs/zarr-spectral-schema#37 writes them again.
-const PENDING_37: &[&str] = &["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr"];
 
 struct S3 {
     _child: Child,
@@ -152,9 +150,7 @@ fn s3_verdict_matches_the_local_and_the_python_verdict(s3: &mut S3) {
             name.as_str(),
             "miss_array.zarr" | "l1_l0_store_abs_path.zarr"
         );
-        if !PENDING_37.contains(&name.as_str()) {
-            assert_eq!(remote.ok(), green, "{name}: {:?}", remote.errors);
-        }
+        assert_eq!(remote.ok(), green, "{name}: {:?}", remote.errors);
     }
 }
 
@@ -163,9 +159,7 @@ fn validator_reads_only_zarr_json_objects(s3: &mut S3) {
     for name in ["ORION_KL", "SOFIA_UPGREAT_ORION_KL.zarr", "l0_sharded.zarr"] {
         // Every node read, and every store green.
         let r = zss::check(Path::new(&url(name)));
-        if !PENDING_37.contains(&name) {
-            assert_eq!(r.errors, Vec::<String>::new(), "{name}");
-        }
+        assert_eq!(r.errors, Vec::<String>::new(), "{name}");
     }
     let log = s3.requests();
     let served = log["served"].as_array().unwrap();
