@@ -1,7 +1,7 @@
 //! Real producer output is read cleanly (Rust binding) — #18, #19.
 //!
 //! The stores under `conformance/real_stores/` are producer output of
-//! ccatobs/kalibrate `epic/21` at 5bf7c7b: zarr-fits wrote L0 3, calibrate wrote
+//! ccatobs/kalibrate `epic/zss-38` at 53e8e8b: zarr-fits wrote L0 3, calibrate wrote
 //! L1 2.0 (see real_stores/README.md). Each store validates with zero findings.
 //! A missing store fails the test; it never returns early. The Python binding
 //! validates the same stores (conformance/test_real_stores.py).

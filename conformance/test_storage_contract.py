@@ -8,6 +8,7 @@ same checks over the same stores (bindings/rust/tests/storage_contract.rs).
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -73,7 +74,7 @@ def test_l1_integer_keepbits_is_green(stores):
 def test_l1_non_integer_keepbits_is_rejected(stores):
     errors = zss.validate(stores / "l1_bad_keepbits.zarr")
     assert any(
-        "keepbits" in e and "scan_000001/spectra" in e and "'integer'" in e
+        "keepbits" in e and "scan_000001/spectra" in e and '"integer"' in e
         for e in errors
     ), errors
 
@@ -136,6 +137,9 @@ def test_unlistable_local_group_is_an_error(tmp_path):
     )
     skydiff = store / "scan_000001" / "skydiff"
     skydiff.chmod(0o311)  # no read: the directory cannot be listed
+    if os.access(skydiff, os.R_OK):  # root lists it anyway: the case cannot arise
+        skydiff.chmod(0o755)
+        pytest.skip("a 0311 directory is listable (running as root)")
     try:
         errors = zss.validate(store)
     finally:
@@ -179,7 +183,7 @@ def test_l0_float_fill_value_is_a_mismatch(stores):
     ), errors
 
 
-# ── 9. one FITS header per array; gamma in counts per second per kelvin ───
+# ── 9. one FITS header per pixel; gamma in counts per second per kelvin ───
 
 
 PIXEL_HEADERS = ["raw_fits_headers", "frontend_backends"]
@@ -222,10 +226,16 @@ def test_l0_headers_without_the_pixel_axes_are_rejected(stores, name, fixture, f
 )
 def test_l0_headers_with_a_wrong_pixel_axis_length_are_rejected(stores, fixture, dim):
     errors = zss.validate(stores / fixture)
-    assert any(
-        f"dimension '{dim}'" in e and "2 in [source/frontend_backends" in e
-        for e in errors
-    ), errors
+    pair = "2 in [source/frontend_backends, source/raw_fits_headers]"
+    assert any(f"dimension '{dim}'" in e and pair in e for e in errors), errors
+
+
+def test_l0_calibration_headers_without_the_pixel_axes_are_rejected(stores):
+    # The calibration group holds its own copies of the per-pixel headers.
+    errors = zss.validate(stores / "l0_cal_headers_1d.zarr")
+    for name in PIXEL_HEADERS:
+        rel = f"scan_000002/calibration/{name}"
+        assert any(rel in e and "ndim 1 != expected 3" in e for e in errors), errors
 
 
 def test_l1_gamma_in_counts_per_kelvin_is_a_units_error(stores):

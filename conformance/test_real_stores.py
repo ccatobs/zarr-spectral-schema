@@ -1,7 +1,7 @@
 """Real producer output is read cleanly (Python binding) — #18, #19.
 
 The stores under ``conformance/real_stores/`` are producer output of
-ccatobs/kalibrate ``epic/21`` at 5bf7c7b: zarr-fits wrote L0 3, calibrate wrote
+ccatobs/kalibrate ``epic/zss-38`` at 53e8e8b: zarr-fits wrote L0 3, calibrate wrote
 L1 2.0 (see real_stores/README.md). Each store validates with zero findings. A
 missing store fails the test; it never skips. The Rust binding validates the
 same stores (bindings/rust/tests/real_stores.rs).
@@ -10,6 +10,7 @@ same stores (bindings/rust/tests/real_stores.rs).
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -66,7 +67,33 @@ def test_real_stores_hold_no_local_path():
             cells += [
                 str(c) for c in zarr.open_array(meta_path.parent, mode="r")[...].ravel()
             ]
-        found += [
-            (str(node), c[:80]) for c in cells if c.startswith("/") or "/home/" in c
-        ]
+        found += [(str(node), c[:80]) for c in cells if _local_path(c)]
     assert found == [], found[:5]
+
+
+# A local path of one machine: an absolute POSIX path, or a home, temp or
+# Windows drive path anywhere in the text.
+_LOCAL_PATH = re.compile(r"^/|/home/|/Users/|/tmp/|~/|\b[A-Za-z]:\\")
+
+
+def _local_path(cell: str) -> bool:
+    return bool(_LOCAL_PATH.search(cell))
+
+
+@pytest.mark.parametrize(
+    "cell",
+    [
+        "/data/x.fits",
+        "FILE = '/home/u/x.fits'",
+        "FILE = 'x/Users/u/x.fits'",
+        "FILE = 'x/tmp/x.fits'",
+        "FILE = '~/x.fits'",
+        "FILE = 'C:\\data\\x.fits'",
+    ],
+)
+def test_path_guard_finds_a_local_path(cell):
+    assert _local_path(cell)
+
+
+def test_path_guard_passes_a_relative_path():
+    assert not _local_path("FILE = 'x.fits' / DATE: 2026-10-14T12:00:00")

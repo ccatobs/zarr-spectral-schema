@@ -26,10 +26,14 @@ contract). Start here:
 - **Versions.** L0 is version 3 and L1 is version 2.0. Each version has a `min_supported` floor in the spec. The floor equals the current version.
 - **Old stores.** The validators accept the current major version only. A store below `min_supported` gets one version error, without a prefix. Structure findings follow when the store lacks fields of the current version. A consumer stops on the version error. A newer major version is an error. A newer minor version gives one warning.
 - **Layout.** A scan sits at `scan_N/`. A multi-frontend scan holds one `band_B/` group per frontend, at L0 and L1. Scan names match `scan_` plus six or more digits.
-- **Arrays.** Every array declares `dims`. Producers write them as the Zarr v3 `dimension_names`. Every array with a physical unit declares `units`. The L1 `flags` array uses the `flag_bits` names.
+- **Arrays.** Every array declares `dims`. Producers write them as the Zarr v3 `dimension_names`. Every array with a physical unit declares `units`. The L1 `flags` array uses the `flag_bits` names. Units compare as exact strings: `ct / (K s)` differs from `ct/(K s)` (ADR 0012, units contract).
+- **Identity.** At L0, the scan group of a single-frontend scan, or each band group of a multi-frontend scan, holds an `arrays` attr that lists the array names in the order of the array axis. `pixels_per_array` follows that order. The attrs `backend`, `obs_id` and `spectel1` sit at the same group, and are optional.
+- **Offsets.** The per-pixel offsets `pixel_offset_lon` and `pixel_offset_lat` are true-angle offsets (ADR 0014, per-pixel offsets are true-angle offsets).
+- **L1 gain.** The L1 attr `image_gain` holds the image share of the total gain. The signal share is `1 - image_gain`.
+- **Rounding.** The `keepbits` attr of `spectra` and `t_sys` is an integer from 0 to 52.
 - **L0 counts.** `data_5d` is `uint32` with fill value 4294967295.
 - **Headers.** `raw_fits_headers` and `frontend_backends` hold one cell per pixel, with dims `[receiver, array, subscan]`.
-- **Provenance.** The L1 attr `source_l0_store` is a URI reference to the L0 store. An absolute local path is not valid.
+- **Provenance.** The L1 attr `source_l0_store` is a URI reference to the L0 store. An absolute local path and a `file:` URI are not valid.
 - **Object storage.** The validators read a local path or an `s3://` URL. They read `zarr.json` objects only and never a chunk. See the binding READMEs for the install steps.
 - **Findings.** A structure finding starts with `[L0] ` or `[L1] ` and names one node. A version error and a level-detection error have no prefix.
 

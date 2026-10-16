@@ -27,8 +27,8 @@ rule: **exactly one of {source, calibration} is present per scan** (`oneOf`, not
 ### Identity (store-and-forward)
 Producer-written self-description that the pipeline forwards rather than
 re-derives. Governing law (ADR-0007): *extract once, forward always, re-derive
-never*. Fields: `frontend`, `pixels_per_array` (canonical = list-of-lists
-positionally aligned with the scan's `arrays` order), and `raw_attrs` (verbatim
+never*. Fields: `frontend`, `arrays`, `pixels_per_array` (canonical = list-of-lists
+positionally aligned with the `arrays` order), and `raw_attrs` (verbatim
 source-keyword provenance). Required since L0 3 and L1 2.0.
 
 ### Placement (scan-or-band)
@@ -90,6 +90,12 @@ scan or band, for example `specsys`, `ref_lon`, `temperature_scale` and
 ### Saturated counter
 The L0 count fill value 4294967295 (u32::MAX). A reading equal to it is not a
 valid count (ADR 0013, L0 counts are uint32).
+
+### True-angle offset
+An offset measured as an angle in the projection plane, so it needs no cos(dec)
+division. The per-pixel offsets `pixel_offset_lon` and `pixel_offset_lat` are
+true-angle offsets (ADR 0014, per-pixel offsets are true-angle offsets).
+_Avoid_: cos(dec)-corrected offset, coordinate offset, delta-RA.
 
 ### Count rate
 Counts per second. The base of the L1 `gamma` unit, `ct/(K s)`.

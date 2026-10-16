@@ -123,8 +123,8 @@
           ]
         },
         "placement": {
-          "description": "Where this group's arrays live relative to a scan group. `scan`: under scan_<N>; `scan_or_band`: under scan_<N> (single-frontend) or each band_<M> (multi-frontend).",
-          "enum": ["scan", "scan_or_band"]
+          "description": "Where this group's arrays live relative to a scan group. `scan_or_band`: under scan_<N> (single-frontend) or each band_<M> (multi-frontend), the only placement.",
+          "enum": ["scan_or_band"]
         },
         "inline": {
           "description": "true ⇒ arrays sit directly in the target dir (no sub-group path segment); false ⇒ under <target>/<groupname>/.",
@@ -146,8 +146,16 @@
       "type": "object",
       "required": ["type", "required"],
       "additionalProperties": false,
-      "if": { "required": ["format"] },
-      "then": { "properties": { "type": { "const": "string" } } },
+      "allOf": [
+        {
+          "if": { "required": ["format"] },
+          "then": { "properties": { "type": { "const": "string" } } }
+        },
+        {
+          "if": { "anyOf": [{ "required": ["minimum"] }, { "required": ["maximum"] }] },
+          "then": { "properties": { "type": { "enum": ["integer", "number"] } } }
+        }
+      ],
       "properties": {
         "type": {
           "description": "JSON value type the attribute is encoded as.",
@@ -163,8 +171,16 @@
           "type": ["string", "integer", "number", "boolean"]
         },
         "format": {
-          "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty and never an absolute path.",
+          "description": "String format constraint, allowed on a `type: string` attr only. `uri-reference`: an RFC 3986 URI reference (an absolute URI, or a relative reference resolved against the URI of the store), never empty, never an absolute path and never a file: URI.",
           "enum": ["uri-reference"]
+        },
+        "minimum": {
+          "description": "Inclusive lower bound of a `type: integer` or `type: number` attr.",
+          "type": "number"
+        },
+        "maximum": {
+          "description": "Inclusive upper bound of a `type: integer` or `type: number` attr.",
+          "type": "number"
         },
         "enum": {
           "description": "Value set: when present on disk, the attribute holds one of these values (or its not-applicable sentinel when `sentinel` is true).",
@@ -194,10 +210,10 @@
         },
         "ndim": { "type": "integer", "minimum": 0, "maximum": 8 },
         "dims": {
-          "description": "Ordered axis names (one per dimension). Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
+          "description": "Ordered axis names (one per dimension), from the dimension vocabulary. Producers write them as the zarr v3 `dimension_names` field. Arrays at one placement target that share an axis name agree on its length.",
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "$ref": "#/$defs/dimension" }
         },
         "units": {
           "description": "FITS unit string as astropy parses it (\"\" = dimensionless). Producers write it as the array's `units` attr. Omitted for labels, indices, counts of items, strings and bitmasks.",
@@ -222,6 +238,10 @@
           "$ref": "#/$defs/ident"
         }
       }
+    },
+    "dimension": {
+      "description": "The dimension vocabulary: channel (C), dump (D), receiver (R, a pixel of an array), array (A, a frontend-backend pair), subscan (S), and load_dump (the length-1 dump axis of a load-temperature table).",
+      "enum": ["channel", "dump", "receiver", "array", "subscan", "load_dump"]
     },
     "dtype_name": {
       "enum": ["float32", "float64", "int32", "int64", "uint8", "uint16", "uint32", "bool", "string"]

@@ -5,11 +5,17 @@
     "line": "NH3(100-001)L",
     "rest_freq_hz": 572498200000.0,
     "frontend": "4G1",
+    "arrays": [
+      "4G1"
+    ],
     "pixels_per_array": [
       [
         "PX00_S"
       ]
     ],
+    "backend": "4G1_PX00_S",
+    "obs_id": "2018-12-18_GR_F541_4G1_PX00_S_029951_002",
+    "spectel1": "GRE_4G1",
     "raw_attrs": {
       "fits_version": "2.12",
       "pixel_offset_method": "direct",

@@ -7,6 +7,7 @@ is not vacuous).
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -16,7 +17,11 @@ from jsonschema import Draft202012Validator
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "bindings" / "python" / "src"))
 
-from zarr_spectral_schema._spec import load_meta_schema, load_spec
+from zarr_spectral_schema._spec import (
+    _validate_against_meta_schema,
+    load_meta_schema,
+    load_spec,
+)
 
 
 def test_meta_schema_is_itself_valid_json_schema():
@@ -158,6 +163,26 @@ def test_real_spec_passes_meta_schema():
             ),
             id="enum-empty",
         ),
+        # #33: `scan_or_band` is the only placement; dims come from the vocabulary.
+        pytest.param(
+            lambda s: s["levels"]["L0"]["groups"]["source"].__setitem__(
+                "placement", "scan"
+            ),
+            id="placement-scan",
+        ),
+        pytest.param(
+            lambda s: s["levels"]["L1"]["groups"]["scan"]["arrays"][
+                "t_int"
+            ].__setitem__("dims", ["time"]),
+            id="dims-outside-vocabulary",
+        ),
+        # A bound constrains a number or an integer, nothing else.
+        pytest.param(
+            lambda s: s["levels"]["L1"]["scan_or_band_attrs"]["line"].__setitem__(
+                "minimum", 0
+            ),
+            id="bound-on-string-attr",
+        ),
     ],
 )
 def test_malformed_spec_is_rejected(mutate):
@@ -169,6 +194,47 @@ def test_malformed_spec_is_rejected(mutate):
     assert list(validator.iter_errors(spec)), (
         "meta-schema should have rejected this mutation"
     )
+
+
+@pytest.mark.parametrize(
+    "mutate, finding",
+    [
+        # Two names for one bit: JSON Schema cannot state it, the spec check does.
+        pytest.param(
+            lambda s: s["flag_bits"].__setitem__("MANUAL", 0),
+            "flag_bits/MANUAL: bit 0 is also BAD_CHANNEL",
+            id="flag-bit-twice",
+        ),
+        # JSON Schema's `integer` admits 4294967295.0; the spec check does not.
+        pytest.param(
+            lambda s: s["levels"]["L0"]["groups"]["source"]["arrays"][
+                "data_5d"
+            ].__setitem__("fill_value", 4294967295.0),
+            "levels/L0/groups/source/arrays/data_5d/fill_value: 4294967295.0 is not an "
+            "integer",
+            id="float-fill-value",
+        ),
+    ],
+)
+def test_spec_check_rejects_what_json_schema_cannot_state(mutate, finding):
+    import copy
+
+    spec = copy.deepcopy(load_spec())
+    mutate(spec)
+    with pytest.raises(ValueError, match=re.escape(finding)):
+        _validate_against_meta_schema(spec)
+
+
+def test_every_fill_value_is_a_yaml_integer():
+    spec = load_spec()
+    fills = [
+        a["fill_value"]
+        for level in spec["levels"].values()
+        for group in level["groups"].values()
+        for a in group["arrays"].values()
+        if "fill_value" in a
+    ]
+    assert fills and all(type(f) is int for f in fills), fills
 
 
 def test_each_detect_attr_names_a_version_of_its_level():
@@ -210,3 +276,10 @@ def test_no_attr_is_declared_at_two_placements():
         sob = set(level.get("scan_or_band_attrs", {}))
         for section in ("scan_attrs", "band_attrs"):
             assert not sob & set(level.get(section, {})), (level_name, section)
+
+
+def test_each_issue_reference_in_the_spec_carries_a_title():
+    # `#19 (title)` or `(#19, title)`: a bare number says nothing to a reader.
+    text = (_ROOT / "spec" / "schema.yaml").read_text(encoding="utf-8")
+    bare = [m.group(0) for m in re.finditer(r"[\w/-]*#\d+(?!\d| \(|, [A-Za-z])", text)]
+    assert bare == [], bare

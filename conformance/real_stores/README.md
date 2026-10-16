@@ -16,14 +16,15 @@ array cell holds a local absolute path.
 | `zarr/SOFIA_UPGREAT_ORION_KL.zarr` | L0 | multi frontend, scans `scan_029951` and `scan_029952`, each with `band_0` and `band_1` |
 | `calibrate/ORION_KL` | L1 | multi frontend, one scan with `band_0` and `band_1` |
 
-- Producer: ccatobs/kalibrate `epic/21` at 5bf7c7b (PR #130, the extended
-  L0–L1 contract), built with `make release-full` in a git checkout, so
+- Producer: ccatobs/kalibrate `epic/zss-38` at 53e8e8b (PR #152, the #34
+  attrs: L0 `arrays`, per-band identity, `image_gain`), built with
+  `make release-full` in a git checkout, so
   `cal_engine_commit` names the commit: zarr-fits 0.2.0 and calibrate (cal
   engine 0.2.0).
 - Input: the FITS datasets `SOFIA_UPGREAT_SINGLE_POINT_TP` and
   `SOFIA_UPGREAT_ORION_KL` of `chai-software/calibrate_parity_tests/data/`,
   and its ATM table `atm_models/atm-table-test-convert.catm`.
-- Written on 2026-10-15 with the commands below. The working directory is the
+- Written on 2026-10-16 with the commands below. The working directory is the
   one that holds `chai-software/`. The producers store the input paths as
   given, so `fits_folder`, `original_fits_file` (in `raw_fits_headers`) and
   `atm_table_info.path` read `chai-software/calibrate_parity_tests/…`.

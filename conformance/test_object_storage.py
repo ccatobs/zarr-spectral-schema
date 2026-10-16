@@ -89,6 +89,8 @@ def test_validator_reads_only_zarr_json_objects(s3):
     served = s3.take_requests()
     assert any(path.endswith("/zarr.json") for _, path, _ in served), served
     assert s3.offending(served) == []
+    # One GET per zarr.json, with no HEAD before it (#33).
+    assert [r for r in served if r[0] == "HEAD"] == []
 
 
 # ── an unreadable node is an error, never a silent gap or an exception ─────
@@ -104,10 +106,8 @@ DENY_CASES = [
     (
         "l1_single.zarr",
         "l1_single.zarr/scan_000001/t_int/zarr.json",
-        [
-            "[L1] 'scan_000001/t_int/zarr.json': cannot read metadata",
-            "[L1] required array 'scan_000001/t_int' is missing",
-        ],
+        # The node exists: no missing-node error beside the read error (#33).
+        ["[L1] 'scan_000001/t_int/zarr.json': cannot read metadata"],
     ),
     ("l1_single.zarr", "l1_single.zarr/", ["'/': cannot list"]),
     (

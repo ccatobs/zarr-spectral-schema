@@ -5,32 +5,10 @@
 //! binding runs the same checks over the same stores
 //! (conformance/test_self_description.py).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
+mod common;
 
+use common::{errors, fixtures};
 use zarr_spectral_schema as zss;
-
-/// Emit the fixtures once per test binary with the shared spec-driven generator.
-fn fixtures() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let out = std::env::temp_dir().join(format!("zss_rust_self_desc_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&out);
-        let status = Command::new("python3")
-            .arg(root.join("conformance/generate.py"))
-            .arg(&out)
-            .status()
-            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-        assert!(status.success(), "generator failed");
-        out
-    })
-}
-
-fn errors(name: &str) -> Vec<String> {
-    zss::validate(&fixtures().join(name))
-}
 
 fn assert_any(name: &str, parts: &[&str]) {
     let e = errors(name);
@@ -141,26 +119,6 @@ fn one_constant_per_flag_bit_with_the_python_values() {
 // ── 3. scientific frame ────────────────────────────────────────────────────
 
 /// The required L1 frame set: scan-or-band and scan attrs, then arrays.
-const FRAME_ATTRS: &[&str] = &[
-    "specsys",
-    "veldef",
-    "vlsr_source",
-    "vlsr_source_frame",
-    "ref_channel_base",
-    "coord_frame",
-    "equinox",
-    "projection",
-    "offset_convention",
-    "temperature_scale",
-    "eta_fss",
-    "eta_mb",
-    "gain_el_correction",
-    "sideband_mode",
-    "image_sideband_fraction",
-    "site_longitude_deg",
-    "site_latitude_deg",
-    "site_altitude_m",
-];
 const FRAME_ARRAYS: &[&str] = &[
     "v_frame",
     "ref_lon",
@@ -173,7 +131,7 @@ const FRAME_ARRAYS: &[&str] = &[
 #[test]
 fn scan_without_the_frame_set_names_each_missing_field() {
     let e = errors("l1_no_frame.zarr");
-    let missing: Vec<String> = FRAME_ATTRS
+    let missing: Vec<String> = zss::FRAME_ATTRS
         .iter()
         .map(|n| format!("attribute '{n}' is missing"))
         .chain(
@@ -209,7 +167,7 @@ const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("temperature_scale", "\"NONE\""),
     ("eta_mb", "null"),
     ("sideband_mode", "\"NONE\""),
-    ("image_sideband_fraction", "null"),
+    ("image_gain", "null"),
     ("site_longitude_deg", "null"),
     ("site_latitude_deg", "null"),
     ("site_altitude_m", "null"),
@@ -226,7 +184,9 @@ fn meta(store: &str, rel: &str) -> serde_json::Value {
 fn fixture_holds_the_not_applicable_sentinel_and_is_green() {
     let scan = meta("l1_not_applicable.zarr", "scan_000001");
     for (name, sentinel) in NOT_APPLICABLE {
-        assert_eq!(scan["attributes"][name].to_string(), *sentinel, "{name}");
+        // `.get`: indexing a missing key yields null, which would pass vacuously.
+        let held = scan["attributes"].get(name).map(|v| v.to_string());
+        assert_eq!(held.as_deref(), Some(*sentinel), "{name}");
     }
     // A frame array that does not apply holds its NaN fill value.
     let platform = meta("l1_not_applicable.zarr", "scan_000001/platform_lon");
@@ -319,6 +279,19 @@ fn multi_frontend_scan_group_holding_arrays_is_rejected() {
 }
 
 #[test]
+fn multi_frontend_scan_group_holding_band_identity_is_rejected() {
+    // #34: backend, obs_id and spectel1 belong to one frontend.
+    for store in ["l0_multi_scan_identity.zarr", "l1_multi_scan_identity.zarr"] {
+        for name in ["backend", "obs_id", "spectel1"] {
+            assert_any(
+                store,
+                &[&format!("attribute '{name}' at 'scan_000001'"), "each band"],
+            );
+        }
+    }
+}
+
+#[test]
 fn l0_multi_frontend_store_holds_each_band_under_its_scan() {
     // scan_N/band_B/ at L0, as at L1: no virtual scan number N + 1000000·b.
     let store = fixtures().join("l0_multi.zarr");
@@ -368,6 +341,9 @@ fn new_structure_findings_carry_the_level_prefix() {
         "l0_multi_band_without_data.zarr",
         "l0_no_l0_complete.zarr",
         "l1_no_identity.zarr",
+        "l0_no_arrays.zarr",
+        "l0_multi_scan_identity.zarr",
+        "l1_multi_scan_identity.zarr",
         "l0_valid_dumps_subscans.zarr",
         "l1_valid_dumps_subscans.zarr",
     ] {
@@ -412,4 +388,13 @@ fn l1_scan_without_its_identity_is_rejected() {
         let want = format!("[L1] required attribute '{name}' is missing at 'scan_000001'");
         assert!(e.contains(&want), "expected {want:?}, got: {e:?}");
     }
+}
+
+#[test]
+fn l0_pixels_per_array_without_arrays_is_rejected() {
+    // #34: pixels_per_array is positional over `arrays`; without it a reader
+    // cannot pair the pixel lists with their arrays.
+    let e = errors("l0_no_arrays.zarr");
+    let want = "[L0] required attribute 'arrays' is missing at 'scan_000001'";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
 }

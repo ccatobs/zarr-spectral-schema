@@ -39,7 +39,7 @@
 //! `validate` returns errors only (back-compat); `check` returns the full
 //! [`ValidationResult`] with warnings.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -94,12 +94,15 @@ struct AttrSpec {
     /// Value set: the attr holds one of these values.
     #[serde(default)]
     r#enum: Option<Vec<Value>>,
+    /// Inclusive bounds of a number or integer attr.
+    #[serde(default)]
+    minimum: Option<serde_json::Number>,
+    #[serde(default)]
+    maximum: Option<serde_json::Number>,
 }
 
 #[derive(Deserialize)]
 struct Group {
-    /// `scan` | `scan_or_band` — where this group's arrays live relative to a scan.
-    placement: String,
     /// true ⇒ arrays sit directly in the target dir; false ⇒ under `<target>/<name>/`.
     inline: bool,
     arrays: BTreeMap<String, ArraySpec>,
@@ -115,9 +118,10 @@ struct ArraySpec {
     #[serde(default)]
     units: Option<String>,
     required: bool,
-    /// Fill value the array must declare in its Zarr metadata.
+    /// Fill value the array must declare in its Zarr metadata: an integer, so a
+    /// spec that writes it as a float fails to load.
     #[serde(default)]
-    fill_value: Option<serde_json::Number>,
+    fill_value: Option<i64>,
     /// Attributes of the array itself (e.g. `keepbits`).
     #[serde(default)]
     attrs: BTreeMap<String, AttrSpec>,
@@ -146,8 +150,8 @@ impl Dtype {
 impl std::fmt::Display for Dtype {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Dtype::One(d) => write!(f, "{d:?}"),
-            Dtype::Set(set) => write!(f, "{set:?}"),
+            Dtype::One(d) => write!(f, "{}", json(&Value::from(d.as_str()))),
+            Dtype::Set(set) => write!(f, "{}", json(&Value::from(set.clone()))),
         }
     }
 }
@@ -177,6 +181,10 @@ struct StoreView {
     arrays: BTreeMap<String, ArrayMeta>,
     /// metadata parse errors of non-root nodes, e.g. `'scan_000001/zarr.json': ...`
     errors: Vec<String>,
+    /// Nodes left out because their metadata did not parse or could not be
+    /// read, and groups that cannot be listed: no node at or below them is
+    /// reported missing.
+    unknown: BTreeSet<String>,
 }
 
 /// One array node of the view (parity with the Python `ArrayView`).
@@ -212,8 +220,9 @@ pub fn validate(store: &Path) -> Vec<String> {
 /// `store` is a local path or, with the `s3` feature, a URL
 /// (`Path::new("s3://bucket/store.zarr")`). An S3 store takes its endpoint,
 /// region and credentials from the standard `AWS_*` environment variables; its
-/// check blocks on a runtime of its own, so do not call it from inside a tokio
-/// runtime. A local check reads with `std::fs` and needs no runtime.
+/// check blocks on a runtime of its own, on a thread of its own, so a caller
+/// inside a tokio runtime may call it too. A local check reads with `std::fs`
+/// and needs no runtime.
 ///
 /// The check reads `zarr.json` objects only, never a chunk. It accepts the
 /// current major version of each level (L0 3, L1 2.0); a store below
@@ -248,8 +257,9 @@ pub fn check(store: &Path) -> ValidationResult {
         let mut detects: Vec<&str> = spec.levels.values().map(|l| l.detect.as_str()).collect();
         detects.sort_unstable();
         result.errors.push(format!(
-            "store declares no known level: none of the detect attributes {detects:?} \
-             are present in root attributes"
+            "store declares no known level: none of the detect attributes {} \
+             are present in root attributes",
+            json(&Value::from(detects))
         ));
         return result;
     }
@@ -260,20 +270,57 @@ pub fn check(store: &Path) -> ValidationResult {
     let applicable_levels: Vec<&str> = applicable.iter().map(|(name, _)| name.as_str()).collect();
     negotiate_versions(&spec, &view.root_attrs, &applicable_levels, &mut result);
 
+    // Metadata that did not parse is a structure finding, reported once (under
+    // the first detected level).
+    let first = applicable[0].0;
+    result
+        .errors
+        .extend(view.errors.iter().map(|e| format!("[{first}] {e}")));
+    let kids = children(&view);
     for (level_name, level) in &applicable {
-        check_level(&view, level_name, level, &mut result);
+        check_level(&view, &kids, level_name, level, &mut result);
     }
 
     result
 }
 
-/// Walk one applicable level's structural contract against the store view.
-fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut ValidationResult) {
-    // Metadata that did not parse is a structure finding of this level.
-    result
-        .errors
-        .extend(view.errors.iter().map(|e| format!("[{level_name}] {e}")));
+/// [`check`] for a store named by a string: a URL (`s3://bucket/store.zarr`,
+/// with the `s3` feature) or a local path, the same grammar. A caller that
+/// holds a URL need not wrap it in a `Path`, which joins and canonicalizes as a
+/// file path.
+pub fn check_url(store: &str) -> ValidationResult {
+    check(Path::new(store))
+}
 
+/// The child node paths of each node, sorted (`""` is the root): one index for
+/// the whole check, so each lookup costs the children of one node, not the
+/// nodes of the store.
+type Children<'a> = BTreeMap<&'a str, Vec<&'a str>>;
+
+fn children(view: &StoreView) -> Children<'_> {
+    let mut kids: Children = BTreeMap::new();
+    for path in view.groups.keys().chain(view.arrays.keys()) {
+        let parent = path.rsplit_once('/').map_or("", |(p, _)| p);
+        kids.entry(parent).or_default().push(path);
+    }
+    for paths in kids.values_mut() {
+        paths.sort_unstable();
+    }
+    kids
+}
+
+/// Up to L0 2, frontend b of scan N was a scan of its own, numbered
+/// N + 1000000 x b (ADR 0011, the band layout); a leftover is a finding.
+const VIRTUAL_OFFSET: u64 = 1_000_000;
+
+/// Walk one applicable level's structural contract against the store view.
+fn check_level(
+    view: &StoreView,
+    kids: &Children,
+    level_name: &str,
+    level: &Level,
+    result: &mut ValidationResult,
+) {
     // Root attrs declared for this level.
     check_attrs(
         &view.root_attrs,
@@ -288,19 +335,37 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         || !level.scan_or_band_attrs.is_empty()
         || !level.groups.is_empty();
 
-    let root_children = view
-        .groups
-        .keys()
-        .chain(view.arrays.keys())
-        .filter(|p| !p.contains('/'));
-    for name in root_children {
+    let no_kids = Vec::new();
+    let kids_of = |p: &str| kids.get(p).unwrap_or(&no_kids);
+    for &name in kids_of("") {
         if name.starts_with("scan_") && !is_scan(name) {
             result.errors.push(format!(
                 "[{level_name}] root child '{name}' does not match the scan pattern {SCAN_PATTERN}"
             ));
+        } else if is_scan(name) && view.arrays.contains_key(name) {
+            result.errors.push(format!(
+                "[{level_name}] '{name}' is an array, expected a scan group"
+            ));
+        } else if let Some(n) = is_scan(name)
+            .then(|| name[5..].parse::<u64>().ok())
+            .flatten()
+            .filter(|n| *n >= VIRTUAL_OFFSET)
+        {
+            let base = format!("scan_{:06}", n % VIRTUAL_OFFSET);
+            if view.groups.contains_key(&base) {
+                result.errors.push(format!(
+                    "[{level_name}] '{name}' is a virtual scan number ({base} + {VIRTUAL_OFFSET} x {}): \
+                     a multi-frontend scan holds each band under scan_N/band_B/",
+                    n / VIRTUAL_OFFSET
+                ));
+            }
         }
     }
-    let scan_groups: Vec<&String> = view.groups.keys().filter(|p| is_scan(p)).collect();
+    let scan_groups: Vec<&str> = kids_of("")
+        .iter()
+        .copied()
+        .filter(|p| is_scan(p) && view.groups.contains_key(*p))
+        .collect();
     if needs_scans && scan_groups.is_empty() {
         result.errors.push(format!(
             "[{level_name}] no scan_<NNNNNN> groups found at the store root"
@@ -308,23 +373,34 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
         return;
     }
 
+    let one_of: Vec<&String> = level
+        .one_of
+        .iter()
+        .filter(|n| level.groups.contains_key(*n))
+        .collect();
     for sg in scan_groups {
-        let bands: Vec<String> = view
-            .groups
-            .keys()
-            .filter(|p| p.strip_prefix(&format!("{sg}/")).is_some_and(is_band))
-            .cloned()
+        let bands: Vec<&str> = kids_of(sg)
+            .iter()
+            .copied()
+            .filter(|p| view.groups.contains_key(*p) && is_band(&p[sg.len() + 1..]))
             .collect();
 
         // Per-scan-group attrs always checked at the scan group itself.
         check_attrs(&view.groups[sg], &level.scan_attrs, sg, level_name, result);
 
-        // Multi-frontend: per-band attrs on each band group, and no scan-or-band
-        // attr on the scan group (it belongs on each band).
+        // Multi-frontend: per-band attrs on each band group; the scan group
+        // holds band groups only, and no scan-or-band attr (it belongs on each
+        // band).
         for b in &bands {
-            check_attrs(&view.groups[b], &level.band_attrs, b, level_name, result);
+            check_attrs(&view.groups[*b], &level.band_attrs, b, level_name, result);
         }
         if !bands.is_empty() {
+            for node in kids_of(sg).iter().filter(|n| !bands.contains(n)) {
+                result.errors.push(format!(
+                    "[{level_name}] '{node}' is not a band group: the scan group of a \
+                     multi-frontend scan holds band groups only"
+                ));
+            }
             for name in level.scan_or_band_attrs.keys() {
                 if view.groups[sg].contains_key(name) {
                     result.errors.push(format!(
@@ -335,14 +411,10 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
             }
         }
 
-        // `scan` placement resolves to the scan group; `scan_or_band` to the
-        // scan group (single-frontend) or each band (multi-frontend).
-        let sob = if bands.is_empty() {
-            vec![sg.clone()]
-        } else {
-            bands
-        };
-        for t in &sob {
+        // `scan_or_band` placement resolves to the scan group (single-frontend)
+        // or each band (multi-frontend).
+        let targets = if bands.is_empty() { vec![sg] } else { bands };
+        for t in targets {
             check_attrs(
                 &view.groups[t],
                 &level.scan_or_band_attrs,
@@ -350,44 +422,43 @@ fn check_level(view: &StoreView, level_name: &str, level: &Level, result: &mut V
                 level_name,
                 result,
             );
-        }
-        // (path, dims, shape) of each array checked, per target.
-        let mut seen: BTreeMap<String, Vec<Seen>> = BTreeMap::new();
-        for (placement, targets) in [("scan", vec![sg.clone()]), ("scan_or_band", sob)] {
-            let placed: Vec<(&String, &Group)> = level
-                .groups
+            // (path, dims, shape) of each array checked at this target.
+            let mut seen: Vec<Seen> = Vec::new();
+            let present: Vec<&String> = one_of
                 .iter()
-                .filter(|(_, g)| g.placement == placement)
+                .copied()
+                .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
                 .collect();
-            let one_of: Vec<&String> = level
-                .one_of
+            // A member left out of the view (its metadata failed) is neither
+            // present nor absent: its own error stands alone.
+            let unknown = one_of
                 .iter()
-                .filter(|n| placed.iter().any(|(p, _)| p == n))
-                .collect();
-            for t in &targets {
-                let present: Vec<&String> = one_of
-                    .iter()
-                    .copied()
-                    .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
-                    .collect();
-                if !one_of.is_empty() && present.len() != 1 {
-                    result.errors.push(format!(
-                        "[{level_name}] '{t}' must hold exactly one of {one_of:?}, found {present:?}"
-                    ));
-                }
-                for (gname, group) in &placed {
-                    if one_of.contains(gname) && !present.contains(gname) {
-                        continue;
-                    }
-                    let seen = seen.entry(t.clone()).or_default();
-                    check_group_arrays(view, t, gname, group, level_name, result, seen);
-                }
+                .any(|n| view.unknown.contains(&format!("{t}/{n}")));
+            if !one_of.is_empty() && !unknown && present.len() != 1 {
+                result.errors.push(format!(
+                    "[{level_name}] '{t}' must hold exactly one of {}, found {}",
+                    json(&names(&one_of)),
+                    json(&names(&present))
+                ));
             }
-        }
-        for (t, arrays) in &seen {
-            check_shared_dims(t, arrays, level_name, result);
+            for (gname, group) in &level.groups {
+                if one_of.contains(&gname) && !present.contains(&gname) {
+                    continue;
+                }
+                check_group_arrays(view, kids, t, gname, group, level_name, result, &mut seen);
+            }
+            check_shared_dims(t, &seen, level_name, result);
         }
     }
+}
+
+/// True when the node at `rel`, or a group above it, was left out of the
+/// view: its metadata did not parse or could not be read or listed.
+fn unknown(view: &StoreView, rel: &str) -> bool {
+    rel.match_indices('/')
+        .map(|(i, _)| &rel[..i])
+        .chain([rel])
+        .any(|p| view.unknown.contains(p))
 }
 
 /// One checked array: (store path, declared dims, on-disk shape).
@@ -435,8 +506,10 @@ fn check_shared_dims(
 /// `base/<group_name>/`. Required arrays must exist (dtype + ndim checked);
 /// optional arrays are checked only when present. An array family (`prefix`)
 /// checks every array whose name starts with the prefix.
+#[allow(clippy::too_many_arguments)]
 fn check_group_arrays(
     view: &StoreView,
+    kids: &Children,
     base: &str,
     group_name: &str,
     group: &Group,
@@ -462,13 +535,13 @@ fn check_group_arrays(
             continue;
         };
         let start = format!("{prefix}/{family}");
-        let mut members: Vec<&String> = view
-            .arrays
-            .keys()
-            .chain(view.groups.keys())
-            .filter(|r| r.starts_with(&start) && !r[prefix.len() + 1..].contains('/'))
+        let members: Vec<&str> = kids
+            .get(prefix.as_str())
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|r| r.starts_with(&start))
             .collect();
-        members.sort();
         if members.is_empty() && aspec.required {
             result.errors.push(format!(
                 "[{level_name}] required array family '{start}*' is missing"
@@ -499,7 +572,7 @@ fn check_array(
         return;
     }
     let Some(arr) = view.arrays.get(rel) else {
-        if aspec.required {
+        if aspec.required && !unknown(view, rel) {
             result
                 .errors
                 .push(format!("[{level_name}] required array '{rel}' is missing"));
@@ -508,17 +581,19 @@ fn check_array(
     };
     if !aspec.dtype.allows(&arr.dtype) {
         result.errors.push(format!(
-            "[{level_name}] array '{rel}' dtype {:?} != expected {}",
-            arr.dtype, aspec.dtype
+            "[{level_name}] array '{rel}' dtype {} != expected {}",
+            json(&Value::from(arr.dtype.as_str())),
+            aspec.dtype
         ));
     }
     if let Some(want) = &aspec.fill_value {
-        let want = Value::Number(want.clone());
+        let want = Value::from(*want);
         // Exact: serde_json numbers differ by kind, so 4294967295.0 is not 4294967295.
         if arr.fill_value.as_ref() != Some(&want) {
-            let got = arr.fill_value.as_ref().map_or("null".to_string(), Value::to_string);
             result.errors.push(format!(
-                "[{level_name}] array '{rel}' fill_value {got} != expected {want}"
+                "[{level_name}] array '{rel}' fill_value {} != expected {}",
+                json(arr.fill_value.as_ref().unwrap_or(&Value::Null)),
+                json(&want)
             ));
         }
     }
@@ -540,37 +615,61 @@ fn check_array(
     match &arr.dimension_names {
         None => result.errors.push(format!(
             "[{level_name}] array '{rel}' has no dimension_names (expected {})",
-            json_list(&dims)
+            json(&Value::Array(dims))
         )),
         Some(Value::Array(names)) if *names == dims => {}
         Some(other) => result.errors.push(format!(
             "[{level_name}] array '{rel}' dimension_names {} != expected {}",
-            other
-                .as_array()
-                .map_or_else(|| other.to_string(), |a| json_list(a)),
-            json_list(&dims)
+            json(other),
+            json(&Value::Array(dims))
         )),
     }
     if let Some(units) = &aspec.units {
         let expected = Value::String(units.clone());
         match arr.attrs.get("units") {
             None => result.errors.push(format!(
-                "[{level_name}] array '{rel}' has no units attr (expected {expected})"
+                "[{level_name}] array '{rel}' has no units attr (expected {})",
+                json(&expected)
             )),
             Some(got) if *got != expected => result.errors.push(format!(
-                "[{level_name}] array '{rel}' units {got} != expected {expected}"
+                "[{level_name}] array '{rel}' units {} != expected {}",
+                json(got),
+                json(&expected)
             )),
             Some(_) => {}
         }
+    } else if let Some(got) = arr.attrs.get("units") {
+        result.errors.push(format!(
+            "[{level_name}] array '{rel}' has a units attr {} but declares no unit",
+            json(got)
+        ));
     }
     check_attrs(&arr.attrs, &aspec.attrs, rel, level_name, result);
 }
 
-/// Render a JSON list as Python's `json.dumps` does (`["a", "b"]`), so both
+/// Render a JSON value as the Python binding does (`json.dumps` with
+/// `ensure_ascii=False, sort_keys=True`: `["a", "b"]`, `{"k": 1}`), so both
 /// bindings word a finding the same way.
-fn json_list(items: &[Value]) -> String {
-    let parts: Vec<String> = items.iter().map(Value::to_string).collect();
-    format!("[{}]", parts.join(", "))
+fn json(value: &Value) -> String {
+    let join = |parts: Vec<String>| parts.join(", ");
+    match value {
+        Value::Array(items) => format!("[{}]", join(items.iter().map(json).collect())),
+        // serde_json's Map is sorted by key, as sort_keys sorts.
+        Value::Object(map) => format!(
+            "{{{}}}",
+            join(
+                map.iter()
+                    .map(|(k, v)| format!("{}: {}", json(&Value::from(k.as_str())), json(v)))
+                    .collect()
+            )
+        ),
+        other => other.to_string(),
+    }
+}
+
+/// A list of names as a JSON array.
+fn names(items: &[&String]) -> Value {
+    Value::from(items.iter().map(|s| s.as_str()).collect::<Vec<_>>())
 }
 
 /// Check declared attrs at one placement location (`where_` is the store path
@@ -601,27 +700,67 @@ fn check_attrs(
         if !type_matches(&aspec.r#type, value) {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must be of type \
-                 {:?}, got {value}",
-                aspec.r#type
+                 {}, got {}",
+                json(&Value::from(aspec.r#type.as_str())),
+                json(value)
             ));
-        } else if let Some(set) = aspec.r#enum.as_ref().filter(|s| !s.contains(value)) {
+        } else if let Some(set) = aspec
+            .r#enum
+            .as_ref()
+            .filter(|s| !s.iter().any(|v| same(v, value)))
+        {
             result.errors.push(format!(
-                "[{level_name}] attribute '{name}' at '{where_}' must be one of {}, got {value}",
-                json_list(set)
+                "[{level_name}] attribute '{name}' at '{where_}' must be one of {}, got {}",
+                json(&Value::Array(set.clone())),
+                json(value)
             ));
-        } else if let Some(equals) = aspec.equals.as_ref().filter(|e| *e != value) {
+        } else if let Some(min) = aspec.minimum.as_ref().filter(|m| compare(value, m).is_lt()) {
             result.errors.push(format!(
-                "[{level_name}] attribute '{name}' at '{where_}' must equal {equals}, got {value}"
+                "[{level_name}] attribute '{name}' at '{where_}' must be >= {min}, got {}",
+                json(value)
+            ));
+        } else if let Some(max) = aspec.maximum.as_ref().filter(|m| compare(value, m).is_gt()) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must be <= {max}, got {}",
+                json(value)
+            ));
+        } else if let Some(equals) = aspec.equals.as_ref().filter(|e| !same(e, value)) {
+            result.errors.push(format!(
+                "[{level_name}] attribute '{name}' at '{where_}' must equal {}, got {}",
+                json(equals),
+                json(value)
             ));
         } else if aspec.format.as_deref() == Some("uri-reference")
             && !value.as_str().is_some_and(is_uri_reference)
         {
             result.errors.push(format!(
                 "[{level_name}] attribute '{name}' at '{where_}' must be a URI reference \
-                 (RFC 3986) and not an absolute path, got {value}"
+                 (RFC 3986), not an absolute path and not a file: URI, got {}",
+                json(value)
             ));
         }
     }
+}
+
+/// JSON equality by type and value, as in the Python binding: numbers compare
+/// by value (`1` equals `1.0`), integers exactly.
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) if x.is_f64() || y.is_f64() => {
+            x.as_f64() == y.as_f64()
+        }
+        _ => a == b,
+    }
+}
+
+/// A JSON number against a bound (`Equal` when it is not a number: the type
+/// check reports that).
+fn compare(value: &Value, bound: &serde_json::Number) -> std::cmp::Ordering {
+    value
+        .as_f64()
+        .zip(bound.as_f64())
+        .and_then(|(v, b)| v.partial_cmp(&b))
+        .unwrap_or(std::cmp::Ordering::Equal)
 }
 
 /// The not-applicable sentinel of an attr type: "NONE" or JSON null.
@@ -675,7 +814,8 @@ fn negotiate_versions(
                 Some(i) => i.to_string(),
                 None => {
                     result.errors.push(format!(
-                        "root attribute '{attr_name}' must be an integer on disk, got {value}"
+                        "root attribute '{attr_name}' must be an integer on disk, got {}",
+                        json(value)
                     ));
                     continue;
                 }
@@ -684,7 +824,8 @@ fn negotiate_versions(
                 Some(s) => s.to_string(),
                 None => {
                     result.errors.push(format!(
-                        "root attribute '{attr_name}' must be a string on disk, got {value}"
+                        "root attribute '{attr_name}' must be a string on disk, got {}",
+                        json(value)
                     ));
                     continue;
                 }
@@ -701,7 +842,8 @@ fn negotiate_versions(
 fn negotiate(attr_name: &str, vspec: &VersionSpec, disk: &str, result: &mut ValidationResult) {
     let Some(store) = parse_version(disk) else {
         result.errors.push(format!(
-            "root attribute '{attr_name}': cannot parse version {disk:?}"
+            "root attribute '{attr_name}': cannot parse version {}",
+            json(&Value::from(disk))
         ));
         return;
     };
@@ -748,12 +890,16 @@ fn parse_version(s: &str) -> Option<(u64, u64)> {
 }
 
 /// An RFC 3986 URI reference (ASCII; a `%` starts a two-hex-digit escape), not
-/// empty and not an absolute path: a leading `/` names a file on one host only.
+/// empty, not an absolute path and not a `file:` URI: those name a file on one
+/// host only.
 /// Parity with the Python `_URI_REFERENCE_RE`.
 fn is_uri_reference(value: &str) -> bool {
     let allowed = |c: u8| c.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=".contains(&c);
     let mut rest = value.as_bytes();
-    if rest.is_empty() || rest[0] == b'/' {
+    let file_uri = rest
+        .get(..5)
+        .is_some_and(|p| p.eq_ignore_ascii_case(b"file:"));
+    if rest.is_empty() || rest[0] == b'/' || file_uri {
         return false;
     }
     while let Some((&c, tail)) = rest.split_first() {
@@ -823,8 +969,9 @@ impl Backend for Fs {
         let mut children = Vec::new();
         for entry in std::fs::read_dir(dir).map_err(drop)? {
             let entry = entry.map_err(drop)?;
-            // file_type() does not follow a symlink: a symlinked directory is skipped.
-            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            // file_type() does not follow a symlink: a symlinked directory is
+            // skipped. A failed file_type() fails the listing, never a gap.
+            if entry.file_type().map_err(drop)?.is_dir() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 children.push((name, entry.path()));
             }
@@ -927,8 +1074,16 @@ fn read_store(store: &Path) -> Result<StoreView, String> {
         None => read_with(&Fs, store.to_path_buf(), store),
         #[cfg(feature = "s3")]
         Some(url) => {
-            let (backend, root) = Obj::open(url)?;
-            read_with(&backend, root, store)
+            // A thread of its own: a runtime cannot block inside the runtime of
+            // a caller.
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let (backend, root) = Obj::open(url)?;
+                    read_with(&backend, root, store)
+                })
+                .join()
+                .unwrap_or_else(|p| std::panic::resume_unwind(p))
+            })
         }
         #[cfg(not(feature = "s3"))]
         Some(_) => Err(format!("{}: s3:// needs the `s3` feature", store.display())),
@@ -970,13 +1125,17 @@ fn walk<B: Backend>(
             format!("{rel}/{name}")
         };
         match read_meta(backend, &child, &format!("{rel}/zarr.json")) {
-            Err(e) => view.errors.push(e),
+            Err(e) => {
+                view.errors.push(e);
+                view.unknown.insert(rel);
+            }
             Ok(None) => {}
             Ok(Some(meta)) => match meta.get("node_type").and_then(Value::as_str) {
                 Some("group") => {
                     view.groups.insert(rel.clone(), attributes(&meta));
                     if let Err(e) = walk(backend, &child, &rel, view) {
                         view.errors.push(e);
+                        view.unknown.insert(rel);
                     }
                 }
                 Some("array") => {
@@ -1018,7 +1177,10 @@ fn read_meta<B: Backend>(
         Ok(Some(bytes)) => String::from_utf8(bytes).ok(),
         Err(()) => return Err(format!("'{rel}': cannot read metadata")),
     };
-    match text.as_deref().map(serde_json::from_str::<Value>) {
+    match text
+        .as_deref()
+        .map(|t| serde_json::from_str::<Value>(&integer_zero(t)))
+    {
         Some(Ok(Value::Object(meta))) => Ok(Some(meta)),
         Some(Err(_)) if text.as_deref().is_some_and(has_non_finite) => {
             Err(format!("'{rel}': non-finite number in metadata"))
@@ -1027,12 +1189,10 @@ fn read_meta<B: Backend>(
     }
 }
 
-/// True when `text` holds a bare `NaN` or `Infinity` token outside a string —
-/// the non-JSON number literals that serde_json rejects and Python's json accepts.
-fn has_non_finite(text: &str) -> bool {
-    let bytes = text.as_bytes();
+/// The byte offsets of `text` outside JSON strings.
+fn outside_strings(text: &str) -> impl Iterator<Item = usize> + '_ {
     let (mut in_string, mut escaped) = (false, false);
-    for (i, &b) in bytes.iter().enumerate() {
+    text.bytes().enumerate().filter_map(move |(i, b)| {
         if in_string {
             match (escaped, b) {
                 (true, _) => escaped = false,
@@ -1040,13 +1200,48 @@ fn has_non_finite(text: &str) -> bool {
                 (false, b'"') => in_string = false,
                 _ => {}
             }
+            None
         } else if b == b'"' {
             in_string = true;
-        } else if bytes[i..].starts_with(b"NaN") || bytes[i..].starts_with(b"Infinity") {
-            return true;
+            None
+        } else {
+            Some(i)
         }
+    })
+}
+
+/// True when `text` holds a bare `NaN` or `Infinity` token outside a string —
+/// the non-JSON number literals that serde_json rejects and Python's json accepts.
+fn has_non_finite(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    outside_strings(text)
+        .any(|i| bytes[i..].starts_with(b"NaN") || bytes[i..].starts_with(b"Infinity"))
+}
+
+/// `text` with each JSON integer `-0` written `0`: serde_json reads `-0` as the
+/// float -0.0, Python's json as the integer 0.
+fn integer_zero(text: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = text.as_bytes();
+    let minus: Vec<usize> = outside_strings(text)
+        .filter(|&i| {
+            bytes[i..].starts_with(b"-0")
+                // `9.7e-0` is an exponent, not an integer -0.
+                && !(i > 0 && matches!(bytes[i - 1], b'e' | b'E'))
+                && !bytes
+                    .get(i + 2)
+                    .is_some_and(|c| c.is_ascii_digit() || b".eE".contains(c))
+        })
+        .collect();
+    if minus.is_empty() {
+        return text.into();
     }
-    false
+    let mut out = bytes.to_vec();
+    for i in minus {
+        out[i] = b' ';
+    }
+    String::from_utf8(out)
+        .expect("an ASCII byte replaced")
+        .into()
 }
 
 /// A node's `attributes` map (empty if absent or not an object).
@@ -1068,5 +1263,28 @@ fn dtype_name(data_type: Option<&Value>) -> String {
             .unwrap_or("")
             .to_string(),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attrs(declared: &str, value: Value) -> Vec<String> {
+        let declared: BTreeMap<String, AttrSpec> =
+            serde_yaml::from_str(&format!("x: {declared}")).unwrap();
+        let mut result = ValidationResult::default();
+        let attrs = Map::from_iter([("x".to_string(), value)]);
+        check_attrs(&attrs, &declared, "root", "L1", &mut result);
+        result.errors
+    }
+
+    #[test]
+    fn enum_and_equals_compare_numbers_by_value() {
+        let one = serde_json::json!(1.0);
+        let set = "{ type: number, required: true, enum: [1, 2] }";
+        assert_eq!(attrs(set, one.clone()), Vec::<String>::new());
+        let equals = "{ type: number, required: true, equals: 1 }";
+        assert_eq!(attrs(equals, one), Vec::<String>::new());
     }
 }

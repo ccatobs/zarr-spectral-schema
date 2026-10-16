@@ -9,4 +9,4 @@
 include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 mod validator;
-pub use validator::{check, validate, ValidationResult};
+pub use validator::{check, check_url, validate, ValidationResult};
