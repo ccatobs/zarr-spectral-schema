@@ -123,7 +123,8 @@ versions:
     # 3 (#19): identity and l0_complete required, dims/units, site location,
     # scan_N/band_B layout. Also in 3: uint32 counts with their fill value
     # (#27), and per-pixel frontend_backends and raw_fits_headers [R,A,S]
-    # (kalibrate#101). The validator accepts the current major only.
+    # (kalibrate#101), the `arrays` attr and backend/obs_id/spectel1 at
+    # scan-or-band placement (#34). The validator accepts the current major only.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -132,7 +133,8 @@ versions:
     # 2.0 (#19): dims/units, the required frame set, identity required and at
     # band placement with the quality record and provenance in multi-frontend
     # stores. Also in 2.0: gamma in ct/(K s), counts per second per kelvin
-    # (kalibrate#101). The validator accepts the current major only.
+    # (kalibrate#101), backend/obs_id/spectel1 at scan-or-band placement and
+    # image_gain (#34). The validator accepts the current major only.
     value: "2.0"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
@@ -168,7 +170,7 @@ levels:
       site_longitude_deg: { type: number,  required: true, sentinel: true }
       site_altitude_m:    { type: number,  required: true, sentinel: true }
     # Per-scan-group attrs (writer.rs:122-145): what all bands of a scan share.
-    # Verbatim identity passthrough (mission_id, obs_id, …) comes from
+    # Verbatim identity passthrough (mission_id, aor_id) comes from
     # scan_attrs.metadata and is store-dependent → required:false.
     scan_attrs:
       scan_number:         { type: integer, required: true }
@@ -180,7 +182,6 @@ levels:
       velocity_source_kms: { type: number,  required: true }
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
-      obs_id:              { type: string,  required: false }
       aor_id:              { type: string,  required: false }
     # Multi-frontend layout (#19): frontend b of scan N sits at scan_N/band_b/,
     # as at L1. There is no virtual scan number. Per-band-group attrs:
@@ -192,13 +193,22 @@ levels:
     scan_or_band_attrs:
       line:             { type: string,  required: true }
       rest_freq_hz:     { type: number,  required: true }
+      # Verbatim identity passthrough of one frontend (#34), store-dependent →
+      # required:false. On the scan group of a multi-frontend scan one value
+      # would be band 0's.
+      backend:          { type: string,  required: false }
+      obs_id:           { type: string,  required: false }
+      spectel1:         { type: string,  required: false }
       # ── Identity + provenance (required since L0 3, #19). The law (ADR-0007):
       # identity is producer-written and forwarded, never re-derived. `frontend`
       # is written here at L0 and forwarded L0→L1 (retiring the fragile
       # longest-common-prefix re-derivation).
       frontend:         { type: string, required: true }
+      # Array names (#34), in the order of the array axis A; pixels_per_array
+      # follows this order (identical L0/L1).
+      arrays:           { type: array, required: true }
       # Per-array pixel layout, canonical = a LIST OF LISTS positionally aligned
-      # with the scan's `arrays` order (identical L0/L1). Declared `type: array`
+      # with the `arrays` order (identical L0/L1). Declared `type: array`
       # ONLY: the legacy HashMap/dict representation (nondeterministic key order)
       # is deliberately NOT admitted — a JSON object fails `type: array`, so the
       # dict form cannot be lifted. The generic validator type-checks the outer
@@ -335,7 +345,6 @@ levels:
       lloadsn:              { type: array,   required: true }
       mjd:                  { type: number,  required: false }
       mission_id:           { type: string,  required: false }
-      obs_id:               { type: string,  required: false }
       aor_id:               { type: string,  required: false }
       date_obs:             { type: string,  required: false }
       telescope:            { type: string,  required: false }
@@ -359,6 +368,10 @@ levels:
       # Completeness marker, written last (calibrated.rs:544-549).
       l1_complete:  { type: boolean, required: true, equals: true }
       # Identity, forwarded from L0 (ADR-0007); required since L1 2.0.
+      # backend, obs_id, spectel1: verbatim passthrough of one frontend (#34).
+      backend:          { type: string,  required: false }
+      obs_id:           { type: string,  required: false }
+      spectel1:         { type: string,  required: false }
       arrays:           { type: array,   required: true }
       pixels_per_array: { type: array,   required: true }
       frontend:         { type: string,  required: true }
@@ -405,7 +418,7 @@ levels:
       eta_mb:            { type: number,  required: true, sentinel: true }   # main-beam efficiency
       gain_el_correction: { type: number, required: true }   # gain-elevation correction calibrate applied
       sideband_mode:     { type: string,  required: true, sentinel: true, enum: [SSB, DSB, USB, LSB] }   # receiver sideband mode
-      image_sideband_fraction: { type: number, required: true, sentinel: true }  # image share of the total gain calibrate applied (gain_image); signal share = 1 - it
+      image_gain:        { type: number,  required: true, sentinel: true }  # image share of the total gain calibrate applied (legacy kalibrate gainimage, FITS GAINIMAG); signal share = 1 - it
     groups:
       # The L1 main arrays sit directly under the scan group (single-frontend) or
       # each band sub-group (multi-frontend) — placement scan_or_band, inline:true

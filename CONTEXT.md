@@ -27,8 +27,8 @@ rule: **exactly one of {source, calibration} is present per scan** (`oneOf`, not
 ### Identity (store-and-forward)
 Producer-written self-description that the pipeline forwards rather than
 re-derives. Governing law (ADR-0007): *extract once, forward always, re-derive
-never*. Fields: `frontend`, `pixels_per_array` (canonical = list-of-lists
-positionally aligned with the scan's `arrays` order), and `raw_attrs` (verbatim
+never*. Fields: `frontend`, `arrays`, `pixels_per_array` (canonical = list-of-lists
+positionally aligned with the `arrays` order), and `raw_attrs` (verbatim
 source-keyword provenance). Required since L0 3 and L1 2.0.
 
 ### Placement (scan-or-band)
