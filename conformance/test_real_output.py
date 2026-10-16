@@ -41,10 +41,14 @@ def test_scan_with_only_source_or_only_calibration_is_green(stores):
     assert zss.validate(stores / "l0.zarr") == []
 
 
-@pytest.mark.parametrize("name", ["l0_both_groups.zarr", "l0_no_group.zarr"])
-def test_scan_with_both_or_neither_group_is_rejected(stores, name):
-    errors = zss.validate(stores / name)
-    assert any("scan_000001" in e and "exactly one of" in e for e in errors), errors
+@pytest.mark.parametrize(
+    "name, found",
+    [("l0_both_groups.zarr", '["source", "calibration"]'), ("l0_no_group.zarr", "[]")],
+)
+def test_scan_with_both_or_neither_group_is_rejected(stores, name, found):
+    # The values are quoted as JSON, the same text as in the Rust binding.
+    want = f'[L0] \'scan_000001\' must hold exactly one of ["source", "calibration"], found {found}'
+    assert zss.validate(stores / name) == [want]
 
 
 def test_provenance_attrs_as_objects_are_green(stores):
@@ -59,7 +63,7 @@ def test_provenance_attrs_as_objects_are_green(stores):
 def test_l1_raw_attrs_must_be_object(stores):
     errors = zss.validate(stores / "l1_bad_raw_attrs.zarr")
     assert any(
-        "raw_attrs" in e and "scan_000001" in e and "must be of type 'object'" in e
+        "raw_attrs" in e and "scan_000001" in e and 'must be of type "object"' in e
         for e in errors
     ), errors
 
@@ -85,7 +89,7 @@ def test_l1_complete_false_is_rejected(stores):
 @pytest.mark.parametrize(
     "name, phrase",
     [
-        ("l0_bad_l0_complete.zarr", "must be of type 'boolean'"),
+        ("l0_bad_l0_complete.zarr", 'must be of type "boolean"'),
         ("l0_incomplete.zarr", "must equal true"),
     ],
 )

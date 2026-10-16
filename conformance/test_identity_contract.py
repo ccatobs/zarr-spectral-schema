@@ -93,7 +93,7 @@ def test_raw_attrs_must_be_object(stores):
     # Assert the type phrase (not just "object", which would match the value
     # text) so this proves a type-error rejection, not merely "an error names it".
     errors = zss.validate(stores / "l0_bad_raw_attrs.zarr")
-    assert any("raw_attrs" in e and "must be of type 'object'" in e for e in errors), (
+    assert any("raw_attrs" in e and 'must be of type "object"' in e for e in errors), (
         errors
     )
 
@@ -105,7 +105,7 @@ def test_pixels_per_array_dict_form_is_rejected(stores):
     # name pixels_per_array, so it would pass vacuously.
     errors = zss.validate(stores / "l0_bad_pixels.zarr")
     assert any(
-        "pixels_per_array" in e and "must be of type 'array'" in e for e in errors
+        "pixels_per_array" in e and 'must be of type "array"' in e for e in errors
     ), errors
 
 

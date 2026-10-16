@@ -12,35 +12,10 @@
 //! negatives (`miss_array.zarr`, `miss_band_index.zarr`), and the
 //! version-negotiation fixtures (`ver_*.zarr`).
 
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod common;
 
+use common::fixtures;
 use zarr_spectral_schema as zss;
-
-static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .expect("canonicalize repo root")
-}
-
-/// Emit fixtures into a unique temp dir using the shared spec-driven generator.
-fn emit_fixtures() -> PathBuf {
-    let root = repo_root();
-    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let out = std::env::temp_dir().join(format!("zss_rust_fix_{}_{n}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&out);
-    let status = Command::new("python3")
-        .arg(root.join("conformance/generate.py"))
-        .arg(&out)
-        .status()
-        .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-    assert!(status.success(), "generator failed");
-    out
-}
 
 #[test]
 fn constants_generated_from_spec() {
@@ -52,21 +27,21 @@ fn constants_generated_from_spec() {
 
 #[test]
 fn l0_store_is_green() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let problems = zss::validate(&f.join("l0.zarr"));
     assert!(problems.is_empty(), "expected green, got: {problems:?}");
 }
 
 #[test]
 fn l1_single_frontend_is_green() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let problems = zss::validate(&f.join("l1_single.zarr"));
     assert!(problems.is_empty(), "expected green, got: {problems:?}");
 }
 
 #[test]
 fn l1_multi_frontend_is_green() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let problems = zss::validate(&f.join("l1_multi.zarr"));
     assert!(problems.is_empty(), "expected green, got: {problems:?}");
 }
@@ -75,7 +50,7 @@ fn l1_multi_frontend_is_green() {
 
 #[test]
 fn missing_required_array_is_rejected() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let problems = zss::validate(&f.join("miss_array.zarr"));
     assert!(
         problems.iter().any(|p| p.contains("scan_000001/spectra")),
@@ -85,7 +60,7 @@ fn missing_required_array_is_rejected() {
 
 #[test]
 fn multi_missing_band_index_is_rejected() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let problems = zss::validate(&f.join("miss_band_index.zarr"));
     assert!(
         problems
@@ -99,10 +74,7 @@ fn multi_missing_band_index_is_rejected() {
 fn store_with_no_level_is_rejected() {
     // A bare group carrying neither detect attr declares no known level. Build it
     // by hand (no version attrs) so the generator stays the single emitter.
-    let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("zss_rust_bare_{}_{n}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = common::scratch("bare");
     std::fs::write(
         dir.join("zarr.json"),
         r#"{"zarr_format":3,"node_type":"group","attributes":{}}"#,
@@ -123,7 +95,7 @@ fn scan_or_band_rule_is_data_driven() {
     // resolves the target from band_<M> presence, never a special case — so a
     // single-frontend store (line/rest_freq_hz at the scan group) and a
     // multi-frontend store (those attrs on each band) both validate green.
-    let f = emit_fixtures();
+    let f = fixtures();
     assert!(zss::validate(&f.join("l1_single.zarr")).is_empty());
     assert!(zss::validate(&f.join("l1_multi.zarr")).is_empty());
 }
@@ -133,18 +105,31 @@ fn scan_or_band_rule_is_data_driven() {
 
 #[test]
 fn version_equal_is_green() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let r = zss::check(&f.join("l1_single.zarr"));
     assert!(r.ok(), "expected green, got: {:?}", r.errors);
-    assert!(r.warnings.is_empty(), "unexpected warnings: {:?}", r.warnings);
+    assert!(
+        r.warnings.is_empty(),
+        "unexpected warnings: {:?}",
+        r.warnings
+    );
 }
 
 #[test]
 fn version_newer_minor_warns_but_passes() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let r = zss::check(&f.join("ver_newer_minor.zarr"));
-    assert!(r.ok(), "newer-minor must still pass, got errors: {:?}", r.errors);
-    assert_eq!(r.warnings.len(), 1, "expected one warning, got: {:?}", r.warnings);
+    assert!(
+        r.ok(),
+        "newer-minor must still pass, got errors: {:?}",
+        r.errors
+    );
+    assert_eq!(
+        r.warnings.len(),
+        1,
+        "expected one warning, got: {:?}",
+        r.warnings
+    );
     let w = &r.warnings[0];
     assert!(
         w.contains("cal_schema_version") && w.contains("2.9") && w.contains("2.0"),
@@ -156,11 +141,13 @@ fn version_newer_minor_warns_but_passes() {
 
 #[test]
 fn version_newer_major_errors() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let r = zss::check(&f.join("ver_newer_major.zarr"));
     assert!(!r.ok(), "newer-major must error");
     assert!(
-        r.errors.iter().any(|e| e.contains("cal_schema_version") && e.contains("3.0")),
+        r.errors
+            .iter()
+            .any(|e| e.contains("cal_schema_version") && e.contains("3.0")),
         "expected newer-major error, got: {:?}",
         r.errors
     );
@@ -168,7 +155,7 @@ fn version_newer_major_errors() {
 
 #[test]
 fn version_l0_integer_newer_major_errors() {
-    let f = emit_fixtures();
+    let f = fixtures();
     let r = zss::check(&f.join("ver_l0_newer_major.zarr"));
     assert!(!r.ok(), "integer newer-major must error");
     assert!(
@@ -182,17 +169,58 @@ fn version_l0_integer_newer_major_errors() {
 fn version_below_floor_is_one_version_error() {
     // min_supported names the oldest version whose stores pass the structural
     // check; the fixtures are structurally current, so the version is the only error.
-    let f = emit_fixtures();
+    let f = fixtures();
     for (name, attr) in [
         ("ver_below_floor.zarr", "cal_schema_version"),
         ("ver_l0_below_floor.zarr", "l0_schema_version"),
     ] {
         let r = zss::check(&f.join(name));
-        assert_eq!(r.errors.len(), 1, "{name}: expected one error, got: {:?}", r.errors);
+        assert_eq!(
+            r.errors.len(),
+            1,
+            "{name}: expected one error, got: {:?}",
+            r.errors
+        );
         assert!(
             r.errors[0].contains(attr) && r.errors[0].contains("minimum supported"),
             "{name}: expected a below-floor error, got: {:?}",
             r.errors
         );
+    }
+}
+
+// ── one verdict: both bindings give the same errors, in the same order ─────
+
+#[test]
+fn every_fixture_gets_the_errors_of_the_python_binding() {
+    let mut stores: Vec<String> = std::fs::read_dir(fixtures())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "zarr"))
+        .map(|p| p.display().to_string())
+        .collect();
+    stores.sort();
+    let python = common::python_errors(&stores);
+    let mut differ = Vec::new();
+    for (store, py) in stores.iter().zip(python) {
+        let rust = zss::check(std::path::Path::new(store)).errors;
+        if rust != py {
+            differ.push(format!("{store}\n  rust:   {rust:?}\n  python: {py:?}"));
+        }
+    }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+#[test]
+fn errors_come_in_the_same_order_on_every_run() {
+    for store in [
+        "l1_bad_skydiff.zarr",
+        "l0_both_groups.zarr",
+        "l1_multi_scan_identity.zarr",
+    ] {
+        let first = zss::check(&fixtures().join(store)).errors;
+        for _ in 0..5 {
+            assert_eq!(zss::check(&fixtures().join(store)).errors, first, "{store}");
+        }
     }
 }

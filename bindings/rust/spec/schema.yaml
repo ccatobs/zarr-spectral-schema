@@ -6,7 +6,7 @@
 # per-binding copies under bindings/*/.../spec/schema.yaml are mechanically
 # synced from this file (`make sync`, verified in CI) — never hand-edited.
 #
-# Scope (#5): the FULL L0+L1 structural contract. Every array AND every on-disk
+# Scope (#5, full L0+L1 contract): the FULL L0+L1 structural contract. Every array AND every on-disk
 # attr the writers emit is declared, with real dtype/ndim mirroring what
 # zarr-fits-core (L0) and cal-io (L1) actually write, plus per-level placement.
 # The hard-coded L1 arrays (t_off/s_h_obs/t_sky_fit/t_cal) now generate consts;
@@ -15,7 +15,7 @@
 #
 # Placement model (interpreted by both validators, never hand-branched): a store
 # is L0 or L1, detected by its root `detect` attr. Each group declares `placement`
-# (`scan` | `scan_or_band`) + `inline` (true ⇒ arrays sit directly in the target
+# (`scan_or_band`, the only one) + `inline` (true ⇒ arrays sit directly in the target
 # dir; false ⇒ under `<target>/<groupname>/`). A scan group is multi-frontend iff
 # it has ≥1 `band_<M>` child; `scan_or_band` then resolves to each band group,
 # and a `scan_or_band_attrs` attr on the scan group itself is an error.
@@ -23,13 +23,14 @@
 # Parse rule (both validators, one grammar): every zarr.json is strict JSON. A
 # non-finite number (NaN, Infinity, -Infinity) is an error of its own
 # ("non-finite number in metadata"); any other zarr.json that does not parse to
-# a JSON object is "malformed metadata". Neither validator raises; the node is
+# a JSON object, or nests more than 127 arrays and objects (the limit of
+# serde_json), is "malformed metadata". Neither validator raises; the node is
 # left out of the walk. data_type may take the string form or the object form
 # ({name: ...}); a node whose node_type differs from the one the spec names is
 # an error. Versions and scan/band names are ASCII digits only. Every structure
 # finding starts with "[<level>] "; version and level-detection errors do not.
 #
-# ── Storage rules (#20, ADR-0008) ──
+# ── Storage rules (#20, object storage; ADR-0008) ──
 #
 # Object storage. A store is a local path or an object-store URL
 # (s3://bucket/store.zarr). An argument that starts with scheme:// is a URL, and
@@ -88,26 +89,30 @@
 # consts — they are validator data only. An attr may carry `equals: <value>`
 # (value constraint): when present, the attr must hold exactly that value; and
 # `format: uri-reference` (RFC 3986 URI reference, not empty, not an absolute
-# path). An array entry may carry `attrs` (the array's own attrs, same rules)
+# path, not a file: URI). An array entry may carry `attrs` (the array's own
+# attrs, same rules)
 # a dtype set (`dtype: [float64, float32]`: any name of the set), and
 # `fill_value` (an integer: the array's Zarr metadata must declare exactly it).
 # An attr may carry `enum: [...]`, its value set: the attr holds one of these.
+# A number or integer attr may carry `minimum`/`maximum`, inclusive bounds.
 # An attr with `sentinel: true` may hold the not-applicable sentinel instead of a
 # value: "NONE" for a string, JSON null for a number (ADR-0007). A required
 # field is always present. NaN is an array fill value only, never an attr value.
 #
-# Dimensions (#19): each array declares `dims`, its ordered axis names; producers
+# Dimensions (#19, dimensions, units, frame): each array declares `dims`, its ordered axis names; producers
 # write them as the zarr v3 `dimension_names` field. Arrays at one placement
 # target (a scan group, or a band group of a multi-frontend scan) that share an
-# axis name agree on its length. The axis vocabulary: channel (C), dump (D),
-# receiver (R, a pixel of an array), array (A, a frontend-backend pair) and
-# subscan (S).
+# axis name agree on its length. The axis vocabulary (meta-schema `dimension`):
+# channel (C), dump (D), receiver (R, a pixel of an array), array (A, a
+# frontend-backend pair), subscan (S) and load_dump (the length-1 dump axis of a
+# load-temperature table); a `dims` item outside it is a spec error.
 #
-# Units (#19): an array that holds a physical quantity declares `units`, a FITS
+# Units (#19, dimensions, units, frame): an array that holds a physical quantity declares `units`, a FITS
 # unit string as astropy parses it (`K`, `Hz`, `km/s`, `deg`, `rad`, `s`; "" for
 # a dimensionless quantity). Producers write it as the array's `units` attr.
 # Labels, indices, scan numbers, counts of items (n_valid_dumps), strings and
-# the `flags` bitmask declare none.
+# the `flags` bitmask declare none, and hold no `units` attr (a finding).
+# Units compare as strings, exactly (ADR 0012): `ct / (K s)` is not `ct/(K s)`.
 # A scalar attr carries its unit as a name suffix (`pwv_mm`, `site_latitude_deg`).
 
 # This repo's package version. OFF-DISK (provenance only) — never on disk.
@@ -120,21 +125,21 @@ versions:
   l0_schema_version:            # → const L0_SCHEMA_VERSION
     level: L0
     on_disk: integer            # zarr-fits writes this root attr as a JSON integer
-    # 3 (#19): identity and l0_complete required, dims/units, site location,
+    # 3 (#19, dimensions, units, frame): identity and l0_complete required, dims/units, site location,
     # scan_N/band_B layout. Also in 3: uint32 counts with their fill value
-    # (#27), and per-pixel frontend_backends and raw_fits_headers [R,A,S]
-    # (kalibrate#101), the `arrays` attr and backend/obs_id/spectel1 at
-    # scan-or-band placement (#34). The validator accepts the current major only.
+    # (#27, L0 count dtype), and per-pixel frontend_backends and raw_fits_headers [R,A,S]
+    # (kalibrate#101, write the extended contract), the `arrays` attr and backend/obs_id/spectel1 at
+    # scan-or-band placement (#34, two spec gaps). The validator accepts the current major only.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
     level: L1
     on_disk: string             # cal-io writes this root attr as a JSON string
-    # 2.0 (#19): dims/units, the required frame set, identity required and at
+    # 2.0 (#19, dimensions, units, frame): dims/units, the required frame set, identity required and at
     # band placement with the quality record and provenance in multi-frontend
     # stores. Also in 2.0: gamma in ct/(K s), counts per second per kelvin
-    # (kalibrate#101), backend/obs_id/spectel1 at scan-or-band placement and
-    # image_gain (#34). The validator accepts the current major only.
+    # (kalibrate#101, write the extended contract), backend/obs_id/spectel1 at scan-or-band placement and
+    # image_gain (#34, two spec gaps). The validator accepts the current major only.
     value: "2.0"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
@@ -164,7 +169,7 @@ levels:
       profile_name:       { type: string,  required: false }
       profile_version:    { type: integer, required: false }
       observatory:        { type: string,  required: false }
-      # Observatory location (#19): required. An airborne observatory has no
+      # Observatory location (#19, dimensions, units, frame): required. An airborne observatory has no
       # fixed site and writes the not-applicable sentinel.
       site_latitude_deg:  { type: number,  required: true, sentinel: true }
       site_longitude_deg: { type: number,  required: true, sentinel: true }
@@ -183,7 +188,7 @@ levels:
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
       aor_id:              { type: string,  required: false }
-    # Multi-frontend layout (#19): frontend b of scan N sits at scan_N/band_b/,
+    # Multi-frontend layout (#19, dimensions, units, frame): frontend b of scan N sits at scan_N/band_b/,
     # as at L1. There is no virtual scan number. Per-band-group attrs:
     band_attrs:
       band_index:       { type: integer, required: true }
@@ -193,18 +198,18 @@ levels:
     scan_or_band_attrs:
       line:             { type: string,  required: true }
       rest_freq_hz:     { type: number,  required: true }
-      # Verbatim identity passthrough of one frontend (#34), store-dependent →
+      # Verbatim identity passthrough of one frontend (#34, two spec gaps), store-dependent →
       # required:false. On the scan group of a multi-frontend scan one value
       # would be band 0's.
       backend:          { type: string,  required: false }
       obs_id:           { type: string,  required: false }
       spectel1:         { type: string,  required: false }
-      # ── Identity + provenance (required since L0 3, #19). The law (ADR-0007):
+      # ── Identity + provenance (required since L0 3, #19 (dimensions, units, frame)). The law (ADR-0007):
       # identity is producer-written and forwarded, never re-derived. `frontend`
       # is written here at L0 and forwarded L0→L1 (retiring the fragile
       # longest-common-prefix re-derivation).
       frontend:         { type: string, required: true }
-      # Array names (#34), in the order of the array axis A; pixels_per_array
+      # Array names (#34, two spec gaps), in the order of the array axis A; pixels_per_array
       # follows this order (identical L0/L1).
       arrays:           { type: array, required: true }
       # Per-array pixel layout, canonical = a LIST OF LISTS positionally aligned
@@ -231,7 +236,7 @@ levels:
       #     tsky (tamb-substituted vs keyword)
       raw_attrs:        { type: object, required: true }
       # Completeness marker: zarr-fits writes it as the last write of a scan or
-      # band (kalibrate#101). Required since L0 3, as l1_complete is at L1: a
+      # band (kalibrate#101, write the extended contract). Required since L0 3, as l1_complete is at L1: a
       # reader reads no unit without its completeness marker.
       l0_complete:      { type: boolean, required: true, equals: true }
     groups:
@@ -285,7 +290,7 @@ levels:
           # length 1 and is not the `dump` axis of data_5d.
           load_temp_sig_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
           load_temp_img_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
-          # Valid dump count per subscan [S] (#20): zarr-fits pads the dump axis
+          # Valid dump count per subscan [S] (#20, object storage): zarr-fits pads the dump axis
           # D of each subscan to the longest subscan; dumps 0..n-1 of subscan s
           # hold data, the rest is fill. Absent ⇒ a reader takes every dump.
           # A count of dumps: no units attr.
@@ -348,7 +353,7 @@ levels:
       aor_id:               { type: string,  required: false }
       date_obs:             { type: string,  required: false }
       telescope:            { type: string,  required: false }
-      # Observatory location (#19), forwarded from the L0 root. An airborne
+      # Observatory location (#19, dimensions, units, frame), forwarded from the L0 root. An airborne
       # observatory writes the not-applicable sentinel here and its position
       # per subscan in the platform_* arrays.
       site_longitude_deg:   { type: number,  required: true, sentinel: true }
@@ -358,7 +363,7 @@ levels:
     band_attrs:
       band_index:       { type: integer, required: true }
     # Attrs of one calibration: at the scan group when single-frontend, at each
-    # band group when multi-frontend (#19: identity, quality record, provenance
+    # band group when multi-frontend (#19, dimensions, units, frame: identity, quality record, provenance
     # and the frame set). In a multi-frontend scan the scan group holds none of
     # them: a scan-or-band attr on that scan group is an error (one value for
     # all bands would be the last band's).
@@ -368,7 +373,7 @@ levels:
       # Completeness marker, written last (calibrated.rs:544-549).
       l1_complete:  { type: boolean, required: true, equals: true }
       # Identity, forwarded from L0 (ADR-0007); required since L1 2.0.
-      # backend, obs_id, spectel1: verbatim passthrough of one frontend (#34).
+      # backend, obs_id, spectel1: verbatim passthrough of one frontend (#34, two spec gaps).
       backend:          { type: string,  required: false }
       obs_id:           { type: string,  required: false }
       spectel1:         { type: string,  required: false }
@@ -383,13 +388,13 @@ levels:
       pwv_mm:           { type: number,  required: true }
       # Provenance: lands only when a Provenance is supplied → required:false.
       cal_hash:             { type: string,  required: false }
-      # The L0 store this L1 store was calibrated from (#20): an RFC 3986 URI
+      # The L0 store this L1 store was calibrated from (#20, object storage): an RFC 3986 URI
       # reference — an absolute URI (s3://bucket/x.zarr) or a relative reference
       # resolved against the URI of this L1 store, its root taken as a directory
       # (../../zarr/x.zarr). A relative reference survives copying the L0 and L1
       # stores together (site-to-data-center replication); file:/// would tie
-      # the link to one host. An empty value, a character outside RFC 3986 and
-      # an absolute POSIX path (/data/x.zarr) are errors.
+      # the link to one host. An empty value, a character outside RFC 3986, an
+      # absolute POSIX path (/data/x.zarr) and a file: URI are errors.
       source_l0_store:      { type: string,  required: false, format: uri-reference }
       source_l0_scans:      { type: object,  required: false }
       cal_config:           { type: object,  required: false }
@@ -397,10 +402,10 @@ levels:
       atm_table_info:       { type: object,  required: false }
       processing_steps:     { type: object,  required: false }
       linked_pwv_source:    { type: object,  required: false }
-      # ── Scientific frame (#19; the names await maintainer approval) ──
+      # ── Scientific frame (#19, dimensions, units, frame; the names await maintainer approval) ──
       # A required frame field is always present; `sentinel: true` marks one that
       # may not apply.
-      # Spectral. TODO(#19): the channel-to-frequency formula (the base of the
+      # Spectral. TODO(#19, dimensions, units, frame): the channel-to-frequency formula (the base of the
       # L0 ref_channel and the role of freq_off) awaits the science review.
       specsys:           { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of signal_freqs/image_freqs (FITS SPECSYS)
       veldef:            { type: string,  required: true, sentinel: true, enum: [RADIO, OPTICAL, RELATIVISTIC] }   # velocity convention (FITS VELDEF)
@@ -431,11 +436,12 @@ levels:
           # Always written (calibrated.rs:358-476). Every array with a `subscan`
           # axis shares the subscan axis of spectra: the ON subscans only.
           # spectra and t_sys take float64 (calibrate today) or float32
-          # (kalibrate#93): a dtype set (#20). A writer that rounds the mantissa
+          # (kalibrate#93, float32 spectra): a dtype set (#20, object storage). A writer that rounds the mantissa
           # (bit rounding) records the kept mantissa bits in the array attr
-          # `keepbits`; absent ⇒ no rounding.
-          spectra:      { dtype: [float64, float32], ndim: 5, dims: [channel, dump, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false } } }   # calibrated T; C,D,R,A,S
-          t_sys:        { dtype: [float64, float32], ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false } } }   # C,R,A,S
+          # `keepbits`, 0 to 52 (the mantissa bits of float64); absent ⇒ no
+          # rounding.
+          spectra:      { dtype: [float64, float32], ndim: 5, dims: [channel, dump, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false, minimum: 0, maximum: 52 } } }   # calibrated T; C,D,R,A,S
+          t_sys:        { dtype: [float64, float32], ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false, minimum: 0, maximum: 52 } } }   # C,R,A,S
           t_int:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S]
           t_off:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] OFF integ time
           t_rec_ssb:    { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A
@@ -457,10 +463,10 @@ levels:
           otf_airmass:      { dtype: float64, ndim: 2, dims: [dump, subscan], units: "", required: false }
           pixel_offset_lon: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: false }
           pixel_offset_lat: { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: deg, required: false }
-          # Valid dump count per subscan [S] (#20): spectra keeps the padded D
+          # Valid dump count per subscan [S] (#20, object storage): spectra keeps the padded D
           # axis of L0, so the L0 count carries over. A count of dumps: no units.
           n_valid_dumps:    { dtype: int32,   ndim: 1, dims: [subscan], required: false }
-          # Scientific frame (#19), per ON subscan (the subscan axis of spectra).
+          # Scientific frame (#19, dimensions, units, frame), per ON subscan (the subscan axis of spectra).
           # NaN fill = not applicable.
           v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # Doppler velocity of the frame (FITS VFRAME)
           ref_lon:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # reference position, in coord_frame
@@ -491,6 +497,13 @@ lists:
                   lloadsn, signal_freq, image_freq, freq_res, freq_off, ref_channel]
   SOURCE_MODES:  ["ON", "OFF", "OTF-ON", "OTF-OFF"]
   CAL_MODES:     ["HOT", "COL", "COLD", "SKY", "ZERO"]
+  # The required L1 frame set (#19, dimensions, units, frame): its attrs,
+  # at scan-or-band placement and, for the site, at scan placement.
+  FRAME_ATTRS:   [specsys, veldef, vlsr_source, vlsr_source_frame, ref_channel_base,
+                  coord_frame, equinox, projection, offset_convention,
+                  temperature_scale, eta_fss, eta_mb, gain_el_correction,
+                  sideband_mode, image_gain, site_longitude_deg, site_latitude_deg,
+                  site_altitude_m]
 
 # Single attribute-name constants → `pub const … : &str`.
 markers:
@@ -525,10 +538,10 @@ precedence_aliases:
 
 # ── RESERVED (ADR-0008) — activated in later slices ──
 #
-# placement:                    # #5 — ARBITRARY archive nesting + the scan-or-band rule
+# placement:                    # #5 (full L0+L1 contract) — ARBITRARY archive nesting + the scan-or-band rule
 #   hierarchy: [flight, scan, band]      # real L0 today: scan_{N}/{source|calibration}/data_5d
 #
-# attrs:                        # #7 science self-description.
+# attrs:                        # #7 (science self-description).
 #   # DECISION (signed off 2026-06-16): `index` marks ATTRIBUTES ONLY (the discovery
 #   # surface a catalog filters on). Array-valued quantities (e.g. signal_freq) are
 #   # cataloged via PRODUCER-written summary attrs (signal_freq_min/max) — extract once,

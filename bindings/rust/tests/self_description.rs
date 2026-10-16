@@ -5,32 +5,10 @@
 //! binding runs the same checks over the same stores
 //! (conformance/test_self_description.py).
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::OnceLock;
+mod common;
 
+use common::{errors, fixtures};
 use zarr_spectral_schema as zss;
-
-/// Emit the fixtures once per test binary with the shared spec-driven generator.
-fn fixtures() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let out = std::env::temp_dir().join(format!("zss_rust_self_desc_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&out);
-        let status = Command::new("python3")
-            .arg(root.join("conformance/generate.py"))
-            .arg(&out)
-            .status()
-            .expect("run conformance/generate.py (needs python3 + zarr/numpy)");
-        assert!(status.success(), "generator failed");
-        out
-    })
-}
-
-fn errors(name: &str) -> Vec<String> {
-    zss::validate(&fixtures().join(name))
-}
 
 fn assert_any(name: &str, parts: &[&str]) {
     let e = errors(name);
@@ -141,26 +119,6 @@ fn one_constant_per_flag_bit_with_the_python_values() {
 // ── 3. scientific frame ────────────────────────────────────────────────────
 
 /// The required L1 frame set: scan-or-band and scan attrs, then arrays.
-const FRAME_ATTRS: &[&str] = &[
-    "specsys",
-    "veldef",
-    "vlsr_source",
-    "vlsr_source_frame",
-    "ref_channel_base",
-    "coord_frame",
-    "equinox",
-    "projection",
-    "offset_convention",
-    "temperature_scale",
-    "eta_fss",
-    "eta_mb",
-    "gain_el_correction",
-    "sideband_mode",
-    "image_gain",
-    "site_longitude_deg",
-    "site_latitude_deg",
-    "site_altitude_m",
-];
 const FRAME_ARRAYS: &[&str] = &[
     "v_frame",
     "ref_lon",
@@ -173,7 +131,7 @@ const FRAME_ARRAYS: &[&str] = &[
 #[test]
 fn scan_without_the_frame_set_names_each_missing_field() {
     let e = errors("l1_no_frame.zarr");
-    let missing: Vec<String> = FRAME_ATTRS
+    let missing: Vec<String> = zss::FRAME_ATTRS
         .iter()
         .map(|n| format!("attribute '{n}' is missing"))
         .chain(

@@ -95,15 +95,39 @@ fn list_consts_match() {
     assert_eq!(
         zss::SOURCE_COORDS,
         &[
-            "mjd", "exptime", "elevation", "azimuth", "pamb", "tamb", "tsky", "signal_freq",
-            "image_freq", "freq_res", "freq_off", "ref_channel", "lloadsn"
+            "mjd",
+            "exptime",
+            "elevation",
+            "azimuth",
+            "pamb",
+            "tamb",
+            "tsky",
+            "signal_freq",
+            "image_freq",
+            "freq_res",
+            "freq_off",
+            "ref_channel",
+            "lloadsn"
         ]
     );
     assert_eq!(
         zss::CAL_COORDS,
         &[
-            "mjd", "exptime", "elevation", "azimuth", "pamb", "tamb", "tsky", "thot", "tcold",
-            "lloadsn", "signal_freq", "image_freq", "freq_res", "freq_off", "ref_channel"
+            "mjd",
+            "exptime",
+            "elevation",
+            "azimuth",
+            "pamb",
+            "tamb",
+            "tsky",
+            "thot",
+            "tcold",
+            "lloadsn",
+            "signal_freq",
+            "image_freq",
+            "freq_res",
+            "freq_off",
+            "ref_channel"
         ]
     );
     assert_eq!(zss::SOURCE_MODES, &["ON", "OFF", "OTF-ON", "OTF-OFF"]);
