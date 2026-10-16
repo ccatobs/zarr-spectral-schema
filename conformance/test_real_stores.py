@@ -32,6 +32,10 @@ REAL_STORES = [
 ]
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="the real stores predate #34 (L0 arrays, per-band identity, image_gain); ccatobs/zarr-spectral-schema#37 writes them again",
+)
 @pytest.mark.parametrize("name", REAL_STORES)
 def test_real_store_has_zero_findings(name):
     store = REAL / name

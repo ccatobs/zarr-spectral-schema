@@ -156,7 +156,7 @@ const FRAME_ATTRS: &[&str] = &[
     "eta_mb",
     "gain_el_correction",
     "sideband_mode",
-    "image_sideband_fraction",
+    "image_gain",
     "site_longitude_deg",
     "site_latitude_deg",
     "site_altitude_m",
@@ -209,7 +209,7 @@ const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("temperature_scale", "\"NONE\""),
     ("eta_mb", "null"),
     ("sideband_mode", "\"NONE\""),
-    ("image_sideband_fraction", "null"),
+    ("image_gain", "null"),
     ("site_longitude_deg", "null"),
     ("site_latitude_deg", "null"),
     ("site_altitude_m", "null"),
@@ -226,7 +226,9 @@ fn meta(store: &str, rel: &str) -> serde_json::Value {
 fn fixture_holds_the_not_applicable_sentinel_and_is_green() {
     let scan = meta("l1_not_applicable.zarr", "scan_000001");
     for (name, sentinel) in NOT_APPLICABLE {
-        assert_eq!(scan["attributes"][name].to_string(), *sentinel, "{name}");
+        // `.get`: indexing a missing key yields null, which would pass vacuously.
+        let held = scan["attributes"].get(name).map(|v| v.to_string());
+        assert_eq!(held.as_deref(), Some(*sentinel), "{name}");
     }
     // A frame array that does not apply holds its NaN fill value.
     let platform = meta("l1_not_applicable.zarr", "scan_000001/platform_lon");
@@ -319,6 +321,19 @@ fn multi_frontend_scan_group_holding_arrays_is_rejected() {
 }
 
 #[test]
+fn multi_frontend_scan_group_holding_band_identity_is_rejected() {
+    // #34: backend, obs_id and spectel1 belong to one frontend.
+    for store in ["l0_multi_scan_identity.zarr", "l1_multi_scan_identity.zarr"] {
+        for name in ["backend", "obs_id", "spectel1"] {
+            assert_any(
+                store,
+                &[&format!("attribute '{name}' at 'scan_000001'"), "each band"],
+            );
+        }
+    }
+}
+
+#[test]
 fn l0_multi_frontend_store_holds_each_band_under_its_scan() {
     // scan_N/band_B/ at L0, as at L1: no virtual scan number N + 1000000·b.
     let store = fixtures().join("l0_multi.zarr");
@@ -368,6 +383,9 @@ fn new_structure_findings_carry_the_level_prefix() {
         "l0_multi_band_without_data.zarr",
         "l0_no_l0_complete.zarr",
         "l1_no_identity.zarr",
+        "l0_no_arrays.zarr",
+        "l0_multi_scan_identity.zarr",
+        "l1_multi_scan_identity.zarr",
         "l0_valid_dumps_subscans.zarr",
         "l1_valid_dumps_subscans.zarr",
     ] {
@@ -412,4 +430,13 @@ fn l1_scan_without_its_identity_is_rejected() {
         let want = format!("[L1] required attribute '{name}' is missing at 'scan_000001'");
         assert!(e.contains(&want), "expected {want:?}, got: {e:?}");
     }
+}
+
+#[test]
+fn l0_pixels_per_array_without_arrays_is_rejected() {
+    // #34: pixels_per_array is positional over `arrays`; without it a reader
+    // cannot pair the pixel lists with their arrays.
+    let e = errors("l0_no_arrays.zarr");
+    let want = "[L0] required attribute 'arrays' is missing at 'scan_000001'";
+    assert!(e.iter().any(|m| m == want), "expected {want:?}, got: {e:?}");
 }

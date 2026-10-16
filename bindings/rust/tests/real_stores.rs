@@ -19,6 +19,7 @@ const REAL_STORES: &[&str] = &[
 ];
 
 #[test]
+#[ignore = "the real stores predate #34 (L0 arrays, per-band identity, image_gain); ccatobs/zarr-spectral-schema#37 writes them again"]
 fn real_stores_have_zero_findings() {
     let real = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/real_stores");
     for name in REAL_STORES {

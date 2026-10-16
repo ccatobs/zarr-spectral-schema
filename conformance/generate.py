@@ -55,11 +55,13 @@ FRAME_ATTRS = (
     "eta_mb",
     "gain_el_correction",
     "sideband_mode",
-    "image_sideband_fraction",
+    "image_gain",
     "site_longitude_deg",
     "site_latitude_deg",
     "site_altitude_m",
 )
+# Per-band identity of a multi-frontend scan (#34): scan-or-band placement.
+BAND_IDENTITY = ("backend", "obs_id", "spectel1")
 # Malformed `shape` values of one array: one fixture each.
 BAD_SHAPES = {
     "string": ["1"],
@@ -746,6 +748,17 @@ def emit_self_description_fixtures(out: Path) -> None:
     # marker on each scan placement target, the L1 identity at scan-or-band.
     emit_l0(out / "l0_no_l0_complete.zarr", omit_attrs={"l0_complete"})
     emit_l1_single(out / "l1_no_identity.zarr", omit_attrs={"frontend", "raw_attrs"})
+    # L0 3 (#34): `arrays` sits where `pixels_per_array` sits, so a reader can
+    # pair the pixel lists with their arrays.
+    emit_l0(out / "l0_no_arrays.zarr", omit_attrs={"arrays"})
+    # L0 3 / L1 2.0 (#34): the per-band identity of a multi-frontend scan sits on
+    # each band; one value on the scan group would be band 0's.
+    for store in (
+        emit_l0(out / "l0_multi_scan_identity.zarr", n_bands=2),
+        emit_l1_multi(out / "l1_multi_scan_identity.zarr"),
+    ):
+        scan = zarr.open_group(store=str(store), mode="r+")[_SCAN]
+        scan.attrs.update({n: f"{n}_value" for n in BAND_IDENTITY})
     # A shape that is not a list of non-negative integers is a finding of its
     # own, not an exception and not a length (review of PR 25, round 1).
     for name, shape in BAD_SHAPES.items():

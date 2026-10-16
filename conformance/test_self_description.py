@@ -162,7 +162,7 @@ NOT_APPLICABLE = {
     "temperature_scale": "NONE",
     "eta_mb": None,
     "sideband_mode": "NONE",
-    "image_sideband_fraction": None,
+    "image_gain": None,
     "site_longitude_deg": None,
     "site_latitude_deg": None,
     "site_altitude_m": None,
@@ -258,6 +258,17 @@ def test_multi_frontend_scan_group_holding_arrays_is_rejected(stores):
     ), errors
 
 
+@pytest.mark.parametrize("level", ["l0", "l1"])
+def test_multi_frontend_scan_group_holding_band_identity_is_rejected(stores, level):
+    # #34: backend, obs_id and spectel1 belong to one frontend.
+    errors = zss.validate(stores / f"{level}_multi_scan_identity.zarr")
+    for name in generate.BAND_IDENTITY:
+        assert any(
+            f"attribute '{name}' at 'scan_000001'" in e and "each band" in e
+            for e in errors
+        ), (name, errors)
+
+
 def test_l0_multi_frontend_store_holds_each_band_under_its_scan(stores):
     # scan_N/band_B/ at L0, as at L1: no virtual scan number N + 1000000·b.
     view = zss._store.read_store(stores / "l0_multi.zarr")  # type: ignore[attr-defined]
@@ -295,6 +306,9 @@ SELF_DESCRIPTION_NEGATIVES = [
     "l0_multi_band_without_data.zarr",
     "l0_no_l0_complete.zarr",
     "l1_no_identity.zarr",
+    "l0_no_arrays.zarr",
+    "l0_multi_scan_identity.zarr",
+    "l1_multi_scan_identity.zarr",
     "l0_valid_dumps_subscans.zarr",
     "l1_valid_dumps_subscans.zarr",
 ]
@@ -333,5 +347,14 @@ def test_l0_scan_without_its_completeness_marker_is_rejected(stores):
 def test_l1_scan_without_its_identity_is_rejected(stores, name):
     errors = zss.validate(stores / "l1_no_identity.zarr")
     assert f"[L1] required attribute '{name}' is missing at 'scan_000001'" in errors, (
+        errors
+    )
+
+
+def test_l0_pixels_per_array_without_arrays_is_rejected(stores):
+    # #34: pixels_per_array is positional over `arrays`; without it a reader
+    # cannot pair the pixel lists with their arrays.
+    errors = zss.validate(stores / "l0_no_arrays.zarr")
+    assert "[L0] required attribute 'arrays' is missing at 'scan_000001'" in errors, (
         errors
     )
