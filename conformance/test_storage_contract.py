@@ -183,7 +183,7 @@ def test_l0_float_fill_value_is_a_mismatch(stores):
     ), errors
 
 
-# ── 9. one FITS header per array; gamma in counts per second per kelvin ───
+# ── 9. one FITS header per pixel; gamma in counts per second per kelvin ───
 
 
 PIXEL_HEADERS = ["raw_fits_headers", "frontend_backends"]
@@ -226,10 +226,16 @@ def test_l0_headers_without_the_pixel_axes_are_rejected(stores, name, fixture, f
 )
 def test_l0_headers_with_a_wrong_pixel_axis_length_are_rejected(stores, fixture, dim):
     errors = zss.validate(stores / fixture)
-    assert any(
-        f"dimension '{dim}'" in e and "2 in [source/frontend_backends" in e
-        for e in errors
-    ), errors
+    pair = "2 in [source/frontend_backends, source/raw_fits_headers]"
+    assert any(f"dimension '{dim}'" in e and pair in e for e in errors), errors
+
+
+def test_l0_calibration_headers_without_the_pixel_axes_are_rejected(stores):
+    # The calibration group holds its own copies of the per-pixel headers.
+    errors = zss.validate(stores / "l0_cal_headers_1d.zarr")
+    for name in PIXEL_HEADERS:
+        rel = f"scan_000002/calibration/{name}"
+        assert any(rel in e and "ndim 1 != expected 3" in e for e in errors), errors
 
 
 def test_l1_gamma_in_counts_per_kelvin_is_a_units_error(stores):

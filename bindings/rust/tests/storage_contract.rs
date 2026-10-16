@@ -190,7 +190,34 @@ fn url_without_the_s3_feature_is_an_explicit_error() {
 #[test]
 fn l0_headers_per_pixel_are_green() {
     // l0_sharded has R = A = S = 2: one cell per pixel and subscan.
+    for name in ["raw_fits_headers", "frontend_backends"] {
+        let meta = fixtures().join(format!(
+            "l0_sharded.zarr/scan_000001/source/{name}/zarr.json"
+        ));
+        let meta: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(meta).unwrap()).unwrap();
+        assert_eq!(meta["shape"], serde_json::json!([2, 2, 2]), "{name}");
+        assert_eq!(
+            meta["dimension_names"],
+            serde_json::json!(["receiver", "array", "subscan"]),
+            "{name}"
+        );
+    }
     assert!(errors("l0_sharded.zarr").is_empty());
+}
+
+#[test]
+fn l0_calibration_headers_without_the_pixel_axes_are_rejected() {
+    // The calibration group holds its own copies of the per-pixel headers.
+    let e = errors("l0_cal_headers_1d.zarr");
+    for name in ["raw_fits_headers", "frontend_backends"] {
+        let rel = format!("scan_000002/calibration/{name}");
+        assert!(
+            e.iter()
+                .any(|m| m.contains(&rel) && m.contains("ndim 1 != expected 3")),
+            "expected an ndim error on {rel}, got: {e:?}"
+        );
+    }
 }
 
 #[test]
@@ -224,7 +251,7 @@ fn l0_headers_with_a_wrong_pixel_axis_length_are_rejected() {
         let e = errors(name);
         assert!(
             e.iter().any(|m| m.contains(&format!("dimension '{dim}'"))
-                && m.contains("2 in [source/frontend_backends")),
+                && m.contains("2 in [source/frontend_backends, source/raw_fits_headers]")),
             "{name}: expected a dimension length error, got: {e:?}"
         );
     }

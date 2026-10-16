@@ -630,6 +630,14 @@ def emit_storage_fixtures(out: Path) -> None:
         out / "l0_headers_array_subscan.zarr",
         array_overrides=_header_override(ndim=2, dims=["array", "subscan"]),
     )
+    # The calibration group holds its own copies of the per-pixel headers.
+    emit_l0(
+        out / "l0_cal_headers_1d.zarr",
+        array_overrides={
+            f"scan_000002/calibration/{n}": {"ndim": 1, "dims": ["subscan"]}
+            for n in ("raw_fits_headers", "frontend_backends")
+        },
+    )
     emit_l0(
         out / "l0_headers_receiver_mismatch.zarr",
         array_overrides=_header_override(shape=(2, 1, 1)),
