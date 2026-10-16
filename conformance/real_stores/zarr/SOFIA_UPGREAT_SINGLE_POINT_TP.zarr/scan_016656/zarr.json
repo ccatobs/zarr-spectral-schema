@@ -5,11 +5,17 @@
     "line": "CII_L",
     "rest_freq_hz": 1900536900000.0,
     "frontend": "LFA",
+    "arrays": [
+      "LFAV"
+    ],
     "pixels_per_array": [
       [
         "PX00_S"
       ]
     ],
+    "backend": "LFAV_PX00_S",
+    "obs_id": "2016-11-10_GR_F348_LFAV_PX00_S_016656_002",
+    "spectel1": "GRE_L2",
     "raw_attrs": {
       "fits_version": "2.10",
       "pixel_offset_method": "reconstructed",
@@ -44,7 +50,6 @@
     "alti_sta": "43003.0",
     "aor_id": "NONE",
     "aot_id": "singlepoint_totalpower.sh_-f_inpar_singlepoint_total_power_OMC_COFF&",
-    "backend": "LFAV_PX00_S",
     "datasrc": "ASTRO",
     "deploy": "DAOF",
     "flight_leg": "8",
@@ -58,12 +63,10 @@
     "lon_sta": "-133.457",
     "mccsmode": "great_standard",
     "mission_id": "2016-11-10_GR_F348",
-    "obs_id": "2016-11-10_GR_F348_LFAV_PX00_S_016656_002",
     "operator": "Bernie",
     "plan_id": "NONE",
     "pressalt": "13262.1252",
     "procstat": "LEVEL_1",
-    "spectel1": "GRE_L2",
     "spectel2": "NONE",
     "tamb_sofi": "242.3",
     "tracerr": "true",
