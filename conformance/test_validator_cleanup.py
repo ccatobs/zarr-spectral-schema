@@ -220,3 +220,18 @@ def test_local_path_is_taken_as_it_is(tmp_path, monkeypatch, name):
 
 def test_array_view_ndim_is_none_without_a_shape():
     assert zss._store.ArrayView("float64", None).ndim is None  # type: ignore[attr-defined]
+
+
+# ── review of PR #40 ───────────────────────────────────────────────────────
+
+
+def test_truncated_one_of_group_gives_the_parse_error_only(stores):
+    assert zss.validate(stores / "l0_truncated_one_of.zarr") == [
+        "[L0] 'scan_000001/source/zarr.json': malformed metadata (not valid JSON)"
+    ]
+
+
+def test_exponent_minus_zero_is_a_number(stores):
+    store = stores / "l1_exponent_zero.zarr"
+    assert '"rest_freq_hz": 9.7e-0' in (store / "scan_000001" / "zarr.json").read_text()
+    assert zss.validate(store) == []

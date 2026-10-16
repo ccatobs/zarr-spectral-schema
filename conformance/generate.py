@@ -846,6 +846,17 @@ def emit_cleanup_fixtures(out: Path) -> None:
             .replace('"attributes": {', f'"attributes": {{"deep": {nested}, ', 1),
             encoding="utf-8",
         )
+    # A one_of group whose zarr.json is cut short beside a valid one: the
+    # parse error is the only finding (review of PR #40).
+    store = emit_l0(
+        out / "l0_truncated_one_of.zarr", scans={_SCAN: ["calibration", "source"]}
+    )
+    (store / _SCAN / "source" / "zarr.json").write_text('{"zarr_format": 3, "node_')
+    # An exponent -0 (9.7e-0) is a number, not an integer -0 (review of PR #40).
+    store = emit_l1_single(out / "l1_exponent_zero.zarr")
+    meta = store / _SCAN / "zarr.json"
+    text = meta.read_text(encoding="utf-8")
+    meta.write_text(text.replace('"rest_freq_hz": 1.0', '"rest_freq_hz": 9.7e-0'))
     # JSON -0 in an integer attr: an integer in both bindings.
     store = emit_l1_single(out / "l1_negative_zero.zarr")
     meta = store / _SCAN / "zarr.json"

@@ -265,7 +265,8 @@ def _check_level(
             )
         elif name in view.arrays and _SCAN_RE.fullmatch(name):
             result.errors.append(f"[{level_name}] '{name}' is an array, expected a scan group")
-        elif _SCAN_RE.fullmatch(name) and int(name[5:]) >= _VIRTUAL_OFFSET:
+        # ponytail: at most 19 digits, the u64 range of the Rust binding's parse.
+        elif _SCAN_RE.fullmatch(name) and len(name) <= 24 and int(name[5:]) >= _VIRTUAL_OFFSET:
             base = f"scan_{int(name[5:]) % _VIRTUAL_OFFSET:06d}"
             if base in view.group_attrs:
                 result.errors.append(
@@ -328,10 +329,11 @@ def _check_level(
             )
             # (path, dims, shape) of each array checked at this target.
             seen: list[tuple[str, list[str], list[int]]] = []
-            present = [
-                n for n in one_of if f"{t}/{n}" in view.group_attrs or f"{t}/{n}" in view.unknown
-            ]
-            if one_of and len(present) != 1:
+            present = [n for n in one_of if f"{t}/{n}" in view.group_attrs]
+            # A member left out of the view (its metadata failed) is neither
+            # present nor absent: its own error stands alone.
+            unknown = any(f"{t}/{n}" in view.unknown for n in one_of)
+            if one_of and not unknown and len(present) != 1:
                 result.errors.append(
                     f"[{level_name}] '{t}' must hold exactly one of {_j(one_of)}, "
                     f"found {_j(present)}"

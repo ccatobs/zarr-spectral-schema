@@ -427,12 +427,14 @@ fn check_level(
             let present: Vec<&String> = one_of
                 .iter()
                 .copied()
-                .filter(|n| {
-                    let path = format!("{t}/{n}");
-                    view.groups.contains_key(&path) || view.unknown.contains(&path)
-                })
+                .filter(|n| view.groups.contains_key(&format!("{t}/{n}")))
                 .collect();
-            if !one_of.is_empty() && present.len() != 1 {
+            // A member left out of the view (its metadata failed) is neither
+            // present nor absent: its own error stands alone.
+            let unknown = one_of
+                .iter()
+                .any(|n| view.unknown.contains(&format!("{t}/{n}")));
+            if !one_of.is_empty() && !unknown && present.len() != 1 {
                 result.errors.push(format!(
                     "[{level_name}] '{t}' must hold exactly one of {}, found {}",
                     json(&names(&one_of)),
@@ -1223,6 +1225,8 @@ fn integer_zero(text: &str) -> std::borrow::Cow<'_, str> {
     let minus: Vec<usize> = outside_strings(text)
         .filter(|&i| {
             bytes[i..].starts_with(b"-0")
+                // `9.7e-0` is an exponent, not an integer -0.
+                && !(i > 0 && matches!(bytes[i - 1], b'e' | b'E'))
                 && !bytes
                     .get(i + 2)
                     .is_some_and(|c| c.is_ascii_digit() || b".eE".contains(c))

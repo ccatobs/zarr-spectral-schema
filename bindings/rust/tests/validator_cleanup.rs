@@ -174,3 +174,21 @@ fn url_without_its_object_store_backend_is_an_error() {
         r.errors
     );
 }
+
+// ── review of PR #40 ───────────────────────────────────────────────────────
+
+#[test]
+fn truncated_one_of_group_gives_the_parse_error_only() {
+    assert_eq!(
+        errors("l0_truncated_one_of.zarr"),
+        ["[L0] 'scan_000001/source/zarr.json': malformed metadata (not valid JSON)"]
+    );
+}
+
+#[test]
+fn exponent_minus_zero_is_a_number() {
+    let store = common::fixtures().join("l1_exponent_zero.zarr");
+    let meta = std::fs::read_to_string(store.join("scan_000001/zarr.json")).unwrap();
+    assert!(meta.contains("\"rest_freq_hz\": 9.7e-0"));
+    assert_eq!(errors("l1_exponent_zero.zarr"), Vec::<String>::new());
+}
