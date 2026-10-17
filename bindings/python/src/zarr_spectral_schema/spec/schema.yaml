@@ -501,7 +501,9 @@ levels:
           # of the physical middle of each dump: dump start + dump step / 2 of the L0
           # source group (otf_clear, bck_len, spec_time, otf_srcyc).
           # Per ON subscan (the subscan axis of spectra). A dump past
-          # n_valid_dumps holds NaN. Optional: an L1 2.0 store lacks it, and
+          # n_valid_dumps holds NaN. A merged beam pair (calibrate
+          # --merge-beams) keeps the time of beam A, as it keeps its otf_lon.
+          # Optional: an L1 2.0 store lacks it, and
           # calibrate writes it only when L0 holds the dump step inputs.
           # Legacy kalibrate stamps the start of an OTF dump instead, and steps a
           # chopped OTF dump by 1 / chop_freq, ignoring otf_srcyc
