@@ -103,6 +103,18 @@ Counts per second. The base of the L1 `gamma` unit, `ct/(K s)`.
 ### Valid dump count (`n_valid_dumps`)
 The number of valid dumps per subscan before padding.
 
+### Dump step
+The time from the start of one dump to the start of the next dump of a
+subscan: `otf_srcyc / chop_freq` for a chopped OTF subscan, `spec_time`
+otherwise. The L0 arrays `otf_clear`, `bck_len`, `spec_time` and `otf_srcyc`
+hold its inputs (#50, time stamp per dump).
+_Avoid_: dump cadence, dump rate.
+
+### Dump time (`dump_mjd`)
+The MJD (UTC) of the physical middle of a dump, written by calibrate at L1:
+the start of the dump plus half a dump step.
+_Avoid_: dump timestamp, UT of the dump.
+
 ### Producer / consumer
 A producer is the one tool that writes a store: zarr-fits writes L0, calibrate
 writes L1. A consumer only reads a store and writes its output to a store of

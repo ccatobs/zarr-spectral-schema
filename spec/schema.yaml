@@ -130,6 +130,8 @@ versions:
     # (#27, L0 count dtype), and per-pixel frontend_backends and raw_fits_headers [R,A,S]
     # (kalibrate#101, write the extended contract), the `arrays` attr and backend/obs_id/spectel1 at
     # scan-or-band placement (#34, two spec gaps). The validator accepts the current major only.
+    # Also in 3, additive (#50, time stamp per dump): the optional dump step input
+    # arrays otf_clear, bck_len, spec_time, otf_srcyc.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -140,7 +142,8 @@ versions:
     # stores. Also in 2.0: gamma in ct/(K s), counts per second per kelvin
     # (kalibrate#101, write the extended contract), backend/obs_id/spectel1 at scan-or-band placement and
     # image_gain (#34, two spec gaps). The validator accepts the current major only.
-    value: "2.0"
+    # 2.1 (#50, time stamp per dump): the optional dump_mjd array (additive).
+    value: "2.1"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -278,6 +281,29 @@ levels:
           instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
           nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
           chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
+          # Dump step inputs (#50, time stamp per dump), typed so no consumer reads
+          # raw_fits_headers. Per subscan [S], from the FITS keywords OTFCLEAR,
+          # BCKLEN, SPECTIME and OTFSRCYC; a keyword the header lacks is written
+          # as 0. Dump j of subscan s spans [start, start + step), with
+          #   start = mjd + (otf_clear * bck_len + j * step) / 86400   (days)
+          #   step  = otf_srcyc / chop_freq  when otf_srcyc > 0 (chopped OTF)
+          #           spec_time              otherwise
+          # A subscan without OTF holds one dump (otf_clear = otf_srcyc = 0), so
+          # its dump spans spec_time from mjd: a total-power or beam-switch dump
+          # spans spec_time, the full integration with both chop phases (exptime
+          # is the on-source share). Checked against UTCSTART..UTCEND of the
+          # SOFIA upGREAT test files (1 s resolution): chopped OTF 28 dumps x
+          # 3/2.5 Hz = 33.6 s vs 34 s, total-power OTF 84 x 0.3 s = 25.2 s vs
+          # 25 s, total power 15 s vs 16 s, beam switch 30 s vs 29 s. An OTF OFF
+          # subscan of a total-power OTF scan holds one dump that integrates for
+          # exptime, not spec_time; L1 holds ON subscans only.
+          # Optional: added within L0 3 (an integer version has no minor axis;
+          # a reader ignores an unknown array). Absent => an L0 3 store written
+          # before #50 (time stamp per dump); calibrate then writes no dump_mjd.
+          otf_clear:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }   # OTFCLEAR: backend cycles cleared before dump 0
+          bck_len:          { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }   # BCKLEN: length of one backend cycle
+          spec_time:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }   # SPECTIME: dump length without chopping
+          otf_srcyc:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }   # OTFSRCYC: chop cycles per dump; 0 = not chopped OTF
           # Source-only geometry: OTF scan track [D,S] and per-pixel offsets [R,A,S].
           # Always written in the `is_source` branch (writer.rs:536-593) → required.
           otf_lon:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: true }
@@ -324,6 +350,11 @@ levels:
           instmode_subscan: { dtype: string,  ndim: 1, dims: [subscan], required: true }
           nod_beam:         { dtype: string,  ndim: 1, dims: [subscan], required: true }
           chop_freq:        { dtype: float32, ndim: 1, dims: [subscan], units: Hz, required: true, const: CHOP_FREQ_COORD }
+          # Dump step inputs (#50, time stamp per dump), as in the source group.
+          otf_clear:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }
+          bck_len:          { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }
+          spec_time:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }
+          otf_srcyc:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }
           # Load-temperature tables, calibration variant. No otf_*/pixel_offset_*
           # here (the writer's geometry block is source-only). Conditional → false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
@@ -466,6 +497,18 @@ levels:
           # Valid dump count per subscan [S] (#20, object storage): spectra keeps the padded D
           # axis of L0, so the L0 count carries over. A count of dumps: no units.
           n_valid_dumps:    { dtype: int32,   ndim: 1, dims: [subscan], required: false }
+          # Time stamp per dump (#50, time stamp per dump; L1 2.1): the MJD (UTC)
+          # of the physical middle of each dump: dump start + dump step / 2 of the L0
+          # source group (otf_clear, bck_len, spec_time, otf_srcyc).
+          # Per ON subscan (the subscan axis of spectra). A dump past
+          # n_valid_dumps holds NaN. A merged beam pair (calibrate
+          # --merge-beams) keeps the time of beam A, as it keeps its otf_lon.
+          # Optional: an L1 2.0 store lacks it, and
+          # calibrate writes it only when L0 holds the dump step inputs.
+          # Legacy kalibrate stamps the start of an OTF dump instead, and steps a
+          # chopped OTF dump by 1 / chop_freq, ignoring otf_srcyc
+          # (ccatobs/kalibrate#203, legacy chopped OTF time stamps).
+          dump_mjd:         { dtype: float64, ndim: 2, dims: [dump, subscan], units: d, required: false }
           # Scientific frame (#19, dimensions, units, frame), per ON subscan (the subscan axis of spectra).
           # NaN fill = not applicable.
           v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # Doppler velocity of the frame (FITS VFRAME)
