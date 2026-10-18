@@ -591,7 +591,7 @@ levels:
           # then expresses f_lsr in the convention it chooses (radio
           # c (1 - f_lsr / rest_freq_hz), optical or relativistic). The
           # radio formula on the topocentric f plus a linear v_frame is off by
-          # up to 14 km/s at 2888 km/s (#59, v_frame conversion; yoda #105).
+          # up to 14 km/s at 2888 km/s (#59, v_frame conversion; yoda #105 (velocity axis convention)).
           # Not the raw FITS VFRAME (L0
           # v_frame_kms, the total velocity). NaN when either L0 value is
           # missing or null, and for an ephemeris source (name starts with @ or
