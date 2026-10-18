@@ -146,7 +146,8 @@ versions:
     # (kalibrate#101, write the extended contract), backend/obs_id/spectel1 at scan-or-band placement and
     # image_gain (#34, two spec gaps). The validator accepts the current major only.
     # 2.1 (#50, time stamp per dump): the optional dump_mjd array (additive).
-    # 2.2 (#58, maintainer answers on the frame set): v_frame holds the L0 v_frame_kms;
+    # 2.2 (#58, maintainer answers on the frame set): v_frame holds the frame
+    # correction from the L0 velocity_source_kms and v_frame_kms;
     # the optional scan attrs spectel2, instcfg, datasrc (additive).
     value: "2.2"
     min_supported: "2.0"
@@ -202,14 +203,17 @@ levels:
       # attr vlsr_source. A header without the keyword gives the null sentinel
       # (#58, maintainer answers on the frame set), never 0.
       velocity_source_kms: { type: number,  required: true, sentinel: true }
-      # Frame velocity (#58, maintainer answers on the frame set): the FITS keyword
-      # VFRAME, the total topocentric line-of-sight velocity of the observer
-      # in km/s that the KOSMA control software applies (write_fits_kosma.c,
-      # scan.dop_vtot; written by every build). One value per scan: every
-      # record of a scan holds the same value in all parity datasets.
-      # calibrate copies it into the L1 v_frame array, one value per ON
-      # subscan. Optional: added within L0 3; absent => a header without
-      # VFRAME or a store written before L1 2.2.
+      # Total velocity (#58, maintainer answers on the frame set): the FITS
+      # keyword VFRAME, raw. The total topocentric line-of-sight velocity in
+      # km/s that the KOSMA control software tunes the LO to: the source
+      # velocity plus the motion of the observer (write_fits_kosma.c,
+      # scan.dop_vtot; written by every build). A line of the source sits at
+      # topocentric velocity v_frame_kms (ORION: RVSYS 10, VFRAME 15.0, line at
+      # 15 km/s). Not the frame correction: L1 v_frame is
+      # velocity_source_kms - v_frame_kms. One value per scan: every record of
+      # a scan holds the same value in all parity datasets. Optional: added
+      # within L0 3; absent => a header without VFRAME or a store written
+      # before L1 2.2.
       v_frame_kms:         { type: number,  required: false }
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
@@ -578,9 +582,18 @@ levels:
           dump_mjd:         { dtype: float64, ndim: 2, dims: [dump, subscan], units: d, required: false }
           # Scientific frame (#19, dimensions, units, frame), per ON subscan (the subscan axis of spectra).
           # NaN fill = not applicable.
-          # v_frame (#58, maintainer answers on the frame set; L1 2.2): the L0 scan attr
-          # v_frame_kms, the same value for every ON subscan. NaN when L0 lacks it.
-          v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # Doppler velocity of the frame (FITS VFRAME)
+          # v_frame (#58, maintainer answers on the frame set; L1 2.2): the frame
+          # correction from the topocentric frame to LSRK, v_lsr - v_topo =
+          # velocity_source_kms - v_frame_kms of L0, the same value for every ON
+          # subscan. A consumer gets v_lsr = v_topo + v_frame, with
+          # v_topo = c (1 - f / rest_freq_hz). Not the raw FITS VFRAME (L0
+          # v_frame_kms, the total velocity). NaN when either L0 value is
+          # missing or null, and for an ephemeris source (name starts with @ or
+          # #): the control software then ignores the source velocity and VFRAME
+          # holds no LSR term. A source the telescope does not track (sky dip,
+          # OCRF_*) has VFRAME = 0 and source velocity 0, so v_frame = 0: no
+          # Doppler correction was applied.
+          v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # frame correction to LSRK, v_lsr - v_topo
           ref_lon:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # reference position, in coord_frame
           ref_lat:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }
           platform_lon: { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # position of an airborne observatory
