@@ -132,8 +132,9 @@ versions:
     # scan-or-band placement (#34, two spec gaps). The validator accepts the current major only.
     # Also in 3, additive (#50, time stamp per dump): the optional dump step input
     # arrays otf_clear, bck_len, spec_time, otf_srcyc.
-    # Also in 3, additive (#56, questions on the frame set): the optional scan
-    # attrs v_frame_kms, spectel2, instcfg, datasrc.
+    # Also in 3, additive (#58, maintainer answers on the frame set): the optional scan
+    # attrs v_frame_kms, spectel2, instcfg, datasrc; velocity_source_kms may hold
+    # the null sentinel.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -145,7 +146,7 @@ versions:
     # (kalibrate#101, write the extended contract), backend/obs_id/spectel1 at scan-or-band placement and
     # image_gain (#34, two spec gaps). The validator accepts the current major only.
     # 2.1 (#50, time stamp per dump): the optional dump_mjd array (additive).
-    # 2.2 (#56, questions on the frame set): v_frame holds the L0 v_frame_kms;
+    # 2.2 (#58, maintainer answers on the frame set): v_frame holds the L0 v_frame_kms;
     # the optional scan attrs spectel2, instcfg, datasrc (additive).
     value: "2.2"
     min_supported: "2.0"
@@ -198,9 +199,10 @@ levels:
       # FITS keyword: RVSYS for SOFIA/GREAT, VELOCITY for CCAT/CHAI and the
       # other KOSMA profiles. For an ephemeris source (name starts with @ or #)
       # the control software ignores the value. calibrate copies it into the L1
-      # attr vlsr_source.
-      velocity_source_kms: { type: number,  required: true }
-      # Frame velocity (#56, questions on the frame set): the FITS keyword
+      # attr vlsr_source. A header without the keyword gives the null sentinel
+      # (#58, maintainer answers on the frame set), never 0.
+      velocity_source_kms: { type: number,  required: true, sentinel: true }
+      # Frame velocity (#58, maintainer answers on the frame set): the FITS keyword
       # VFRAME, the total topocentric line-of-sight velocity of the observer
       # in km/s that the KOSMA control software applies (write_fits_kosma.c,
       # scan.dop_vtot; written by every build). One value per scan: every
@@ -212,7 +214,7 @@ levels:
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
       aor_id:              { type: string,  required: false }
-      # spectel2, instcfg, datasrc (#43, spec wording gaps; #56, questions on the frame set): verbatim
+      # spectel2, instcfg, datasrc (#43, spec wording gaps; #58, maintainer answers on the frame set): verbatim
       # passthrough of the FITS keywords SPECTEL2, INSTCFG and DATASRC
       # (SOFIA/GREAT). They belong to the scan group, also for a multi-frontend
       # scan: every record of a scan holds the same value (all multi-frontend
@@ -411,7 +413,7 @@ levels:
       mjd:                  { type: number,  required: false }
       mission_id:           { type: string,  required: false }
       aor_id:               { type: string,  required: false }
-      # Forwarded verbatim from the L0 scan attrs (#56, questions on the frame set).
+      # Forwarded verbatim from the L0 scan attrs (#58, maintainer answers on the frame set).
       spectel2:             { type: string,  required: false }
       instcfg:              { type: string,  required: false }
       datasrc:              { type: string,  required: false }
@@ -576,7 +578,7 @@ levels:
           dump_mjd:         { dtype: float64, ndim: 2, dims: [dump, subscan], units: d, required: false }
           # Scientific frame (#19, dimensions, units, frame), per ON subscan (the subscan axis of spectra).
           # NaN fill = not applicable.
-          # v_frame (#56, questions on the frame set; L1 2.2): the L0 scan attr
+          # v_frame (#58, maintainer answers on the frame set; L1 2.2): the L0 scan attr
           # v_frame_kms, the same value for every ON subscan. NaN when L0 lacks it.
           v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # Doppler velocity of the frame (FITS VFRAME)
           ref_lon:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # reference position, in coord_frame

@@ -15,7 +15,7 @@ of the ops-db chain (different domain, not co-located).
 
 The spec and both bindings are live and tested. The current contract is L0
 schema version 3 and L1 schema version 2.2 (epic 21, production-grade L0-L1
-contract; 2.1 adds the time stamp per dump of #50, 2.2 the frame velocity (#56, questions on the frame set)). Start here:
+contract; 2.1 adds the time stamp per dump of #50, 2.2 the frame velocity (#58, maintainer answers on the frame set)). Start here:
 
 1. Read `docs/adr/0007-zarr-spectral-schema-shared-source-of-truth.md` (shared source of truth). It holds the binding decisions.
 2. Skim `spec/schema.yaml` and the conformance tests beside it.
