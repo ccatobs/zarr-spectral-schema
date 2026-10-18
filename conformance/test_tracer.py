@@ -41,7 +41,7 @@ def test_constants_derived_from_spec():
     # Expanded vocabulary (#3): groups, L1 version, marker, list consts.
     assert zss.SOURCE_GROUP == "source"
     assert zss.CALIBRATION_GROUP == "calibration"
-    assert zss.L1_SCHEMA_VERSION == "2.2"  # const name ≠ UPPER(attr cal_schema_version)
+    assert zss.L1_SCHEMA_VERSION == "2.3"  # const name ≠ UPPER(attr cal_schema_version)
     assert zss.TSKY_L0 == "tsky"  # const override
     assert zss.L1_COMPLETE_ATTR == "l1_complete"  # marker
     assert zss.SOURCE_MODES == ("ON", "OFF", "OTF-ON", "OTF-OFF")  # list const
