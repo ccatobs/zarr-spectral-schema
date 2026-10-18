@@ -187,10 +187,23 @@ levels:
       date_obs:            { type: string,  required: true }
       telescope:           { type: string,  required: true }
       observer:            { type: string,  required: true }
+      # Source velocity (#52, frame of the source velocity): the systemic
+      # velocity of the source in km/s. Frame: the kinematic local standard of
+      # rest (LSRK). Convention: relativistic. The KOSMA control software tunes
+      # the LO with this value (kosma_software obsdop.c:377-437, lo_server.c:806-813).
+      # FITS keyword: RVSYS for SOFIA/GREAT, VELOCITY for CCAT/CHAI and the
+      # other KOSMA profiles. For an ephemeris source (name starts with @ or #)
+      # the control software ignores the value. calibrate copies it into the L1
+      # attr vlsr_source.
       velocity_source_kms: { type: number,  required: true }
       lloadsn:             { type: integer, required: true }
       mission_id:          { type: string,  required: false }
       aor_id:              { type: string,  required: false }
+      # spectel2, instcfg, datasrc (#43, spec wording gaps): verbatim
+      # passthrough of the FITS keywords SPECTEL2, INSTCFG and DATASRC, not
+      # declared here. They belong to the scan group, also for a multi-frontend
+      # scan: every record of a scan holds the same value (all multi-frontend
+      # SOFIA/GREAT parity datasets). zarr-fits takes the value of band 0.
     # Multi-frontend layout (#19, dimensions, units, frame): frontend b of scan N sits at scan_N/band_b/,
     # as at L1. There is no virtual scan number. Per-band-group attrs:
     band_attrs:
@@ -427,6 +440,10 @@ levels:
       # the link to one host. An empty value, a character outside RFC 3986, an
       # absolute POSIX path (/data/x.zarr) and a file: URI are errors.
       source_l0_store:      { type: string,  required: false, format: uri-reference }
+      # The L0 scans this calibration read (#43, spec wording gaps): an object,
+      # as cal-io writes it and yoda reads it (keys source_scan, band_index,
+      # source_on_subscans, source_off_subscans, cal_scan, cal_band, cal_modes).
+      # Top-level object type-checked only.
       source_l0_scans:      { type: object,  required: false }
       cal_config:           { type: object,  required: false }
       processing_timestamp: { type: string,  required: false }
@@ -439,7 +456,12 @@ levels:
       # Spectral. TODO(#19, dimensions, units, frame): the channel-to-frequency formula (the base of the
       # L0 ref_channel and the role of freq_off) awaits the science review.
       specsys:           { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of signal_freqs/image_freqs (FITS SPECSYS)
-      veldef:            { type: string,  required: true, sentinel: true, enum: [RADIO, OPTICAL, RELATIVISTIC] }   # velocity convention (FITS VELDEF)
+      # Source velocity (#52, frame of the source velocity): vlsr_source is the
+      # L0 velocity_source_kms. vlsr_source_frame and veldef state its frame and
+      # its convention: LSRK and RELATIVISTIC for KOSMA data (SOFIA/GREAT,
+      # CCAT/CHAI). A finite vlsr_source has a vlsr_source_frame and a veldef
+      # other than the sentinel.
+      veldef:            { type: string,  required: true, sentinel: true, enum: [RADIO, OPTICAL, RELATIVISTIC] }   # velocity convention of vlsr_source (FITS VELDEF)
       vlsr_source:       { type: number,  required: true, sentinel: true }   # systemic velocity of the source, km/s (legacy name, no unit suffix)
       vlsr_source_frame: { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of vlsr_source (SPECSYS vocabulary)
       ref_channel_base:  { type: integer, required: true, enum: [0, 1] }   # base (0 or 1) of the L0 ref_channel
@@ -447,6 +469,13 @@ levels:
       coord_frame:       { type: string,  required: true, sentinel: true, enum: [ICRS, FK5, FK4, GALACTIC, AZEL] }   # frame of ref_lon/ref_lat and the offsets
       equinox:           { type: number,  required: true, sentinel: true }   # epoch of an FK4/FK5 frame (FITS EQUINOX)
       projection:        { type: string,  required: true, sentinel: true, enum: [SFL, GLS, TAN, SIN, ARC, CAR] }   # FITS projection code of the offsets
+      # Offsets (#43, spec wording gaps; ADR 0014, pixel offsets are true-angle
+      # offsets): one value governs otf_* and pixel_offset_* together.
+      #   equatorial_cosdec: true-angle offsets in the projection plane; the
+      #                      longitude offset holds the factor cos(lat)
+      #   equatorial_coord:  plain coordinate differences, without cos(lat)
+      #   horizontal:        offsets in azimuth and elevation
+      # KOSMA data hold true-angle offsets (ADR 0014): equatorial_cosdec.
       offset_convention: { type: string,  required: true, sentinel: true, enum: [equatorial_cosdec, equatorial_coord, horizontal] }   # how otf_* and pixel_offset_* offsets are formed
       # Intensity.
       temperature_scale: { type: string,  required: true, sentinel: true, enum: ["TA*", TMB, "TR*", TB] }   # intensity scale of spectra
@@ -473,8 +502,24 @@ levels:
           # rounding.
           spectra:      { dtype: [float64, float32], ndim: 5, dims: [channel, dump, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false, minimum: 0, maximum: 52 } } }   # calibrated T; C,D,R,A,S
           t_sys:        { dtype: [float64, float32], ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: true, attrs: { keepbits: { type: integer, required: false, minimum: 0, maximum: 52 } } }   # C,R,A,S
-          t_int:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S]
-          t_off:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] OFF integ time
+          # Integration times per dump (#53, per-dump meaning of t_int and t_off),
+          # per ON subscan; a consumer computes the radiometer noise from them.
+          # t_int: the ON integration time of one dump, the L0 exptime of the ON
+          #   subscan. Not the time of the subscan.
+          # t_off: the integration time of the reference that one dump subtracts,
+          #   the L0 exptime of the OFF. Twice that time when the reference is the
+          #   blend of the beam A and beam B OFFs (legacy kalibrate
+          #   buffers.cpp:710; kalibrate PR #219, write twice the OFF time into
+          #   t_off for a blended DBS reference). An ON without a partner OFF of
+          #   the other beam has no blend.
+          #   - cal_strategy totalpower, otf_totalpower: all dumps of a subscan
+          #     subtract the same reference. The mean of N dumps has OFF time t_off.
+          #   - cal_strategy otf_chopped, beam_switch: each dump subtracts its own
+          #     OFF dump. The mean of N dumps has OFF time N * t_off
+          #     (yoda PR #90, scale the OFF time with the dump count). A beam_switch subscan
+          #     holds one dump.
+          t_int:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] ON time of one dump
+          t_off:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: true }   # [S] reference time of one dump
           t_rec_ssb:    { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A
           gamma:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: ct/(K s), required: true }   # counts per second per kelvin
           tau_signal:   { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, signal sideband
@@ -560,7 +605,14 @@ markers:
 # (cal-core/src/flags.rs) and YODA (io/flags.py) write it.
 flag_bits:
   BAD_CHANNEL: 0      # calibrate: bad channel (hot <= cold, t_rec out of range)
-  FILL_VALUE: 1       # calibrate: raw data missing (fill value)
+  # FILL_VALUE (#43, spec wording gaps): calibrate writes NaN into spectra and
+  # sets the bit when the raw data are missing or corrupt, or when its result
+  # is not finite (kalibrate#115, close three legacy-parity gaps of the
+  # atmosphere path; PR #160, T_sys at the OFF conditions).
+  # Missing: the L0 fill value. Corrupt: a count of 0, or a count rate above
+  # 10 times its channel median over the scan (kalibrate PR #221, read a count
+  # above 10 times its channel median as missing).
+  FILL_VALUE: 1       # calibrate: raw data missing or corrupt, or a value calibrate cannot calibrate
   SPIKE: 2            # reduction: spike
   RFI: 3              # reduction: radio-frequency interference
   TSYS_OUTLIER: 4     # reduction: t_sys outside its threshold

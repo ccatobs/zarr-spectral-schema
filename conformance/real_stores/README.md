@@ -48,9 +48,13 @@ array cell holds a local absolute path.
   ```
 
   The calibrate flags are those of the parity harness (`tests.yaml`).
-  ORION_KL adds `--mode tp`: its scan is a beam-switch scan, which calibrate
-  does not calibrate in the auto-detected mode. Total power calibrates its
-  ON against its OFF subscans, as the stores of #18 (accept real output) did.
+  ORION_KL adds `--mode tp`: its scan is a beam-switch scan, and calibrate at
+  53e8e8b does not calibrate a beam-switch scan in the auto-detected mode.
+  Total power calibrates its ON against its OFF subscans, as the stores of
+  #18 (accept real output) did. kalibrate PR #156 (calibrate beam-switch scans
+  outside on-the-fly mode through the chopped path) is not in 53e8e8b. With
+  PR #156, calibrate detects the scan as `beam_switch`: a refresh drops
+  `--mode tp`.
 - Crop: none. Only the session lock `.calibrate.lock` of each L1 output is
   left out; every other file is byte-identical to the producer output.
 - The `zarr/` and `calibrate/` layout matches the producer output, so the L1
