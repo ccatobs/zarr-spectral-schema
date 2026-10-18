@@ -196,7 +196,7 @@ levels:
       # Source velocity (#52, frame of the source velocity): the systemic
       # velocity of the source in km/s. Frame: the kinematic local standard of
       # rest (LSRK). Convention: relativistic. The KOSMA control software tunes
-      # the LO with this value (kosma_software obsdop.c:377-437, lo_server.c:806-813).
+      # the LO with this value (kosma_software 2c4f8d71c obsdop.c:377-437, lo_server.c:863-870).
       # FITS keyword: RVSYS for SOFIA/GREAT, VELOCITY for CCAT/CHAI and the
       # other KOSMA profiles. For an ephemeris source (name starts with @ or #)
       # the control software ignores the value. calibrate copies it into the L1
@@ -585,8 +585,14 @@ levels:
           # v_frame (#58, maintainer answers on the frame set; L1 2.2): the frame
           # correction from the topocentric frame to LSRK, v_lsr - v_topo =
           # velocity_source_kms - v_frame_kms of L0, the same value for every ON
-          # subscan. A consumer gets v_lsr = v_topo + v_frame, with
-          # v_topo = c (1 - f / rest_freq_hz). Not the raw FITS VFRAME (L0
+          # subscan. v_lsr = v_topo + v_frame. The velocities compose
+          # relativistically: a consumer shifts the topocentric frequency by
+          # f_lsr = f * D(v_frame), D(v) = sqrt((1 - v/c) / (1 + v/c)), and
+          # then expresses f_lsr in the convention it chooses (radio
+          # c (1 - f_lsr / rest_freq_hz), optical or relativistic). The
+          # radio formula on the topocentric f plus a linear v_frame is off by
+          # up to 14 km/s at 2888 km/s (#59, v_frame conversion; yoda #105).
+          # Not the raw FITS VFRAME (L0
           # v_frame_kms, the total velocity). NaN when either L0 value is
           # missing or null, and for an ephemeris source (name starts with @ or
           # #): the control software then ignores the source velocity and VFRAME
