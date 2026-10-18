@@ -149,7 +149,9 @@ versions:
     # 2.2 (#58, maintainer answers on the frame set): v_frame holds the frame
     # correction from the L0 velocity_source_kms and v_frame_kms;
     # the optional scan attrs spectel2, instcfg, datasrc (additive).
-    value: "2.2"
+    # 2.3 (#54, per-pixel PWV): the optional pwv_spectrum and
+    # tau_signal_spectrum arrays (additive).
+    value: "2.3"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -455,6 +457,9 @@ levels:
       raw_attrs:        { type: object,  required: true }
       # Quality record.
       qa:               { type: object,  required: true }
+      # PWV of the reference pixel of the first fitted OFF (qa
+      # pwv_reference_pixels). The PWV of each spectrum is the
+      # pwv_spectrum array (#54, per-pixel PWV).
       pwv_mm:           { type: number,  required: true }
       # Provenance: lands only when a Provenance is supplied → required:false.
       cal_hash:             { type: string,  required: false }
@@ -550,6 +555,16 @@ levels:
           gamma:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: ct/(K s), required: true }   # counts per second per kelvin
           tau_signal:   { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, signal sideband
           tau_image:    { dtype: float64, ndim: 1, dims: [channel], units: "", required: true }   # zenith opacity, image sideband
+          # The PWV and the zenith signal opacity that calibrated each spectrum
+          # (#54, per-pixel PWV; L1 2.3), per ON subscan: the fit of the OFF of
+          # that subscan, per pixel with calibrate --pwv-per-pixel, else the
+          # reference-pixel value of that OFF for every pixel. Legacy kalibrate
+          # writes them per spectrum as MH2O and TAU-ATM (TAU-ATM: the mean over
+          # the channels). NaN where the OFF fit failed. pwv_mm, tau_signal and
+          # tau_image keep the reference pixel of the first fitted OFF.
+          # Optional: an L1 2.2 store lacks them.
+          pwv_spectrum:        { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: mm, required: false }
+          tau_signal_spectrum: { dtype: float64, ndim: 4, dims: [channel, receiver, array, subscan], units: "", required: false }
           t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky
           s_h_obs:      { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] observed sky-hot
           t_sky_fit:    { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] ATM-model sky

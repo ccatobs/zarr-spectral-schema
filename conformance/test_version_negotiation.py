@@ -39,7 +39,7 @@ def stores(tmp_path_factory) -> Path:
     # version overridden, so the only thing under test is the range check. The
     # cal_schema_version fixtures ride an L1 single-frontend store; the integer
     # (l0_schema_version) fixture rides an L0 store.
-    generate.emit_l1_single(out / "equal.zarr")  # spec-current: cal=2.2
+    generate.emit_l1_single(out / "equal.zarr")  # spec-current: cal=2.3
     for name, versions in generate.VERSION_FIXTURES.items():
         generate.emit(out / name, versions=versions)
     for name, versions in generate.L0_VERSION_FIXTURES.items():
@@ -63,7 +63,7 @@ def test_newer_minor_warns_but_passes(stores):
     assert len(result.warnings) == 1, result.warnings
     w = result.warnings[0]
     assert "cal_schema_version" in w
-    assert "2.9" in w and "2.2" in w
+    assert "2.9" in w and "2.3" in w
     # Back-compat surface: validate() returns errors only → empty here.
     assert zss.validate(stores / "ver_newer_minor.zarr") == []
 
