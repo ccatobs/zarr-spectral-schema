@@ -14,8 +14,8 @@ of the ops-db chain (different domain, not co-located).
 ## Status
 
 The spec and both bindings are live and tested. The current contract is L0
-schema version 3 and L1 schema version 2.1 (epic 21, production-grade L0-L1
-contract; 2.1 adds the time stamp per dump of #50). Start here:
+schema version 3 and L1 schema version 2.2 (epic 21, production-grade L0-L1
+contract; 2.1 adds the time stamp per dump of #50, 2.2 the frame velocity (#58, maintainer answers on the frame set)). Start here:
 
 1. Read `docs/adr/0007-zarr-spectral-schema-shared-source-of-truth.md` (shared source of truth). It holds the binding decisions.
 2. Skim `spec/schema.yaml` and the conformance tests beside it.
@@ -23,7 +23,7 @@ contract; 2.1 adds the time stamp per dump of #50). Start here:
 
 ## The contract in short
 
-- **Versions.** L0 is version 3 and L1 is version 2.1. Each version has a `min_supported` floor in the spec: L0 3 and L1 2.0. L1 2.1 only adds the optional `dump_mjd` array, so an L1 2.0 store still passes.
+- **Versions.** L0 is version 3 and L1 is version 2.2. Each version has a `min_supported` floor in the spec: L0 3 and L1 2.0. L1 2.1 adds the optional `dump_mjd` array, L1 2.2 fills `v_frame` with the frame correction to LSRK (L0 `velocity_source_kms` minus `v_frame_kms`) and adds three optional scan attrs, so an L1 2.0 store still passes.
 - **Old stores.** The validators accept the current major version only. A store below `min_supported` gets one version error, without a prefix. Structure findings follow when the store lacks fields of the current version. A consumer stops on the version error. A newer major version is an error. A newer minor version gives one warning.
 - **Layout.** A scan sits at `scan_N/`. A multi-frontend scan holds one `band_B/` group per frontend, at L0 and L1. Scan names match `scan_` plus six or more digits.
 - **Arrays.** Every array declares `dims`. Producers write them as the Zarr v3 `dimension_names`. Every array with a physical unit declares `units`. The L1 `flags` array uses the `flag_bits` names. Units compare as exact strings: `ct / (K s)` differs from `ct/(K s)` (ADR 0012, units contract).
