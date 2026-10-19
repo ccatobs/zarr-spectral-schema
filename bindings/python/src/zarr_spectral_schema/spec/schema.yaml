@@ -135,6 +135,8 @@ versions:
     # Also in 3, additive (#58, maintainer answers on the frame set): the optional scan
     # attrs v_frame_kms, spectel2, instcfg, datasrc; velocity_source_kms may hold
     # the null sentinel.
+    # Also in 3, additive (#63, line range LRANGE): the optional scan attr
+    # line_ranges_kms.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -151,7 +153,9 @@ versions:
     # the optional scan attrs spectel2, instcfg, datasrc (additive).
     # 2.3 (#54, per-pixel PWV): the optional pwv_spectrum and
     # tau_signal_spectrum arrays (additive).
-    value: "2.3"
+    # 2.4 (#63, line range LRANGE): the optional scan attr line_ranges_kms,
+    # copied from L0 (additive).
+    value: "2.4"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -228,6 +232,22 @@ levels:
       spectel2:            { type: string,  required: false }
       instcfg:             { type: string,  required: false }
       datasrc:             { type: string,  required: false }
+      # Line range (#63, line range LRANGE): the velocity ranges that lines of
+      # the source occupy, as [lo, hi] pairs in km/s, float64, lo < hi
+      # (IC1623: [[5644.0, 6269.0]]). zarr-fits parses the FITS keyword LRANGE
+      # (KOSMA obs-unit parameter line_range): a comma separates tokens, and
+      # each lo:hi:v token gives one pair. Absolute velocities, not relative to
+      # velocity_source_kms, with the frame and the definition (convention) of
+      # velocity_source_kms. One value per scan: it holds for every band.
+      # Optional: absent when LRANGE is missing, UNKNOWN or does not parse.
+      # Only the unit flag v parses; a token with another flag means the
+      # whole attr is absent.
+      # NOTE (#63, line range LRANGE): KOSMA may define other unit flags (f for frequency?); all
+      # observed values and the ops-db docstring show v only.
+      # NOTE (#63, line range LRANGE): the header gives VELDEF = LSR only. The definition of
+      # velocity_source_kms is assumed because the IC1623 range is centred on
+      # VELOCITY = 5956.468; KOSMA has not confirmed it.
+      line_ranges_kms:     { type: array,   required: false }
     # Multi-frontend layout (#19, dimensions, units, frame): frontend b of scan N sits at scan_N/band_b/,
     # as at L1. There is no virtual scan number. Per-band-group attrs:
     band_attrs:
@@ -423,6 +443,10 @@ levels:
       spectel2:             { type: string,  required: false }
       instcfg:              { type: string,  required: false }
       datasrc:              { type: string,  required: false }
+      # Copied from the L0 scan attr line_ranges_kms (#63, line range LRANGE;
+      # L1 2.4): [lo, hi] pairs in km/s with the frame and definition of
+      # vlsr_source. Absent when the L0 scan lacks it.
+      line_ranges_kms:      { type: array,   required: false }
       date_obs:             { type: string,  required: false }
       telescope:            { type: string,  required: false }
       # Observatory location (#19, dimensions, units, frame), forwarded from the L0 root. An airborne
