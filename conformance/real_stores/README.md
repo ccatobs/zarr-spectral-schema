@@ -3,8 +3,8 @@
 Producer output that both validators must read cleanly. The real-store tests
 (`conformance/test_real_stores.py`, `bindings/rust/tests/real_stores.rs`)
 validate every store listed here and fail when one is missing. Each store is
-at the current versions (L0 3, L1 2.0) and gets zero findings in both
-bindings. The ORION_KL pair is also served on S3, and the object-storage
+at L0 3 or L1 2.0, the `min_supported` floor versions, and gets zero findings
+in both bindings. The ORION_KL pair is also served on S3, and the object-storage
 tests (`test_object_storage.py`, `object_storage.rs`) read it there without
 an error. `test_real_stores.py` also checks that no attribute and no string
 array cell holds a local absolute path.
