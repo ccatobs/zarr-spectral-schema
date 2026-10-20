@@ -120,3 +120,16 @@ def test_scan_or_band_rule_is_data_driven(stores):
     assert "line" not in view_multi.group_attrs["scan_000001"]
     assert "line" in view_multi.group_attrs["scan_000001/band_0"]
     assert "line" in view_multi.group_attrs["scan_000001/band_1"]
+
+
+# ── reference position (kalibrate#252, reference position) ─────────────────
+
+
+def test_l0_reference_position_attrs_are_typed(tmp_path):
+    ok = {"ref_lon_deg": 202.46958, "ref_lat_deg": 47.19525, "coordsys": "J2000"}
+    generate.emit_l0(tmp_path / "ok.zarr", scan_attr_overrides=ok)
+    assert zss.check(tmp_path / "ok.zarr").ok
+    bad = dict(ok, ref_lon_deg="202.46958")
+    generate.emit_l0(tmp_path / "bad.zarr", scan_attr_overrides=bad)
+    errors = zss.check(tmp_path / "bad.zarr").errors
+    assert any("ref_lon_deg" in e for e in errors), errors

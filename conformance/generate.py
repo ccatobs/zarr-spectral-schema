@@ -433,7 +433,7 @@ def emit(
 
 
 # Version-negotiation fixtures (Slice 3, #4). Each overrides one on-disk version
-# relative to the spec's current `value` (cal=2.4); structure stays spec-current
+# relative to the spec's current `value` (cal=2.5); structure stays spec-current
 # so the only thing under test is the version range check. Expected outcome is
 # named for the binding tests that validate these same stores.
 # min_supported is the oldest version whose stores pass the structural check,
