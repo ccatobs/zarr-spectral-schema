@@ -137,6 +137,8 @@ versions:
     # the null sentinel.
     # Also in 3, additive (#63, line range LRANGE): the optional scan attr
     # line_ranges_kms.
+    # Also in 3, additive (kalibrate#252, reference position): the optional scan
+    # attrs ref_lon_deg, ref_lat_deg and coordsys.
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -155,7 +157,10 @@ versions:
     # tau_signal_spectrum arrays (additive).
     # 2.4 (#63, line range LRANGE): the optional scan attr line_ranges_kms,
     # copied from L0 (additive).
-    value: "2.4"
+    # 2.5 (kalibrate#252, reference position): ref_lon and ref_lat, and coord_frame
+    # and equinox, hold the L0 reference position and its frame when L0 has them.
+    # No new name: a store below 2.5 holds NaN and the sentinel there.
+    value: "2.5"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -248,6 +253,18 @@ levels:
       # velocity_source_kms is assumed because the IC1623 range is centred on
       # VELOCITY = 5956.468; KOSMA has not confirmed it.
       line_ranges_kms:     { type: array,   required: false }
+      # Reference position (kalibrate#252, reference position): the position
+      # that the offsets otf_lon/otf_lat and pixel_offset_* are relative to,
+      # in degrees: the FITS keywords LAMBDA (longitude) and BETA (latitude),
+      # raw, in the frame coordsys names. coordsys is the verbatim FITS keyword
+      # COORDSYS: J2000, B1950, GALACTIC or HORIZON. One value per scan: it
+      # holds for every band. Optional: absent when LAMBDA or BETA is missing,
+      # or a keyword is not a number. A source the telescope does not track
+      # (COORDSYS OCRF, sky dip) has no sky position: calibrate then writes no
+      # reference position.
+      ref_lon_deg:         { type: number,  required: false }
+      ref_lat_deg:         { type: number,  required: false }
+      coordsys:            { type: string,  required: false }
     # Multi-frontend layout (#19, dimensions, units, frame): frontend b of scan N sits at scan_N/band_b/,
     # as at L1. There is no virtual scan number. Per-band-group attrs:
     band_attrs:
@@ -521,6 +538,11 @@ levels:
       vlsr_source_frame: { type: string,  required: true, sentinel: true, enum: [TOPOCENT, GEOCENTR, BARYCENT, HELIOCEN, LSRK, LSRD, GALACTOC] }   # frame of vlsr_source (SPECSYS vocabulary)
       ref_channel_base:  { type: integer, required: true, enum: [0, 1] }   # base (0 or 1) of the L0 ref_channel
       # Position: the reference position is the ref_lon/ref_lat arrays.
+      # From L1 2.5 calibrate fills them from the L0 ref_lon_deg, ref_lat_deg and
+      # coordsys: J2000 gives FK5 with equinox 2000.0, B1950 gives FK4 with
+      # equinox 1950.0, GALACTIC gives GALACTIC and HORIZON gives AZEL, both
+      # with the null equinox. Any other coordsys, or none, leaves NaN and the
+      # sentinels. projection stays at its sentinel.
       coord_frame:       { type: string,  required: true, sentinel: true, enum: [ICRS, FK5, FK4, GALACTIC, AZEL] }   # frame of ref_lon/ref_lat and the offsets
       equinox:           { type: number,  required: true, sentinel: true }   # epoch of an FK4/FK5 frame (FITS EQUINOX)
       projection:        { type: string,  required: true, sentinel: true, enum: [SFL, GLS, TAN, SIN, ARC, CAR] }   # FITS projection code of the offsets
@@ -639,6 +661,9 @@ levels:
           # OCRF_*) has VFRAME = 0 and source velocity 0, so v_frame = 0: no
           # Doppler correction was applied.
           v_frame:      { dtype: float64, ndim: 1, dims: [subscan], units: km/s, required: true }  # frame correction to LSRK, v_lsr - v_topo
+          # ref_lon, ref_lat (kalibrate#252, reference position; L1 2.5): the L0
+          # reference position, the same value for every ON subscan; NaN when
+          # L0 has none or its coordsys is no sky frame.
           ref_lon:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # reference position, in coord_frame
           ref_lat:      { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }
           platform_lon: { dtype: float64, ndim: 1, dims: [subscan], units: deg, required: true }   # position of an airborne observatory
