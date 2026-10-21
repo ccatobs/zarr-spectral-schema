@@ -627,9 +627,11 @@ levels:
           # Optional: an L1 2.5 store lacks it.
           transmission_signal_spectrum: { dtype: float64, ndim: 4, dims: [channel, receiver, array, subscan], units: "", required: false }
           # Sky-emission templates (#68, reference airmass and sky-emission
-          # templates; L1 2.7). airmass_reference is the airmass calibrate used
-          # for t of each ON subscan (for a blended DBS reference, the weighted
-          # airmass of the blend). The two spectra are the derivatives of the
+          # templates; L1 2.7). airmass_reference is the airmass of the OFF
+          # reference that calibrate subtracted from each ON subscan. For one
+          # OFF it is the airmass that set t. For a blended or interpolated
+          # reference it is the weighted airmass of the OFFs. The two spectra
+          # are the derivatives of the
           # DSB sky model T_sky at that airmass and the fitted PWV, on the
           # temperature scale of spectra * transmission_signal_spectrum.
           # Invariant: for a dump at airmass A_on,
