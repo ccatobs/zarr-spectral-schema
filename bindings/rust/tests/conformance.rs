@@ -132,7 +132,7 @@ fn version_newer_minor_warns_but_passes() {
     );
     let w = &r.warnings[0];
     assert!(
-        w.contains("cal_schema_version") && w.contains("2.9") && w.contains("2.6"),
+        w.contains("cal_schema_version") && w.contains("2.9") && w.contains("2.7"),
         "warning should name the axis and both versions, got: {w}"
     );
     // Back-compat: validate() returns errors only → empty for a warning-only store.
