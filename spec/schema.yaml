@@ -160,7 +160,9 @@ versions:
     # 2.5 (kalibrate#252, reference position): ref_lon and ref_lat, and coord_frame
     # and equinox, hold the L0 reference position and its frame when L0 has them.
     # No new name: a store below 2.5 holds NaN and the sentinel there.
-    value: "2.5"
+    # 2.6 (#66, transmission of each spectrum): the optional
+    # transmission_signal_spectrum array (additive).
+    value: "2.6"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -611,6 +613,16 @@ levels:
           # Optional: an L1 2.2 store lacks them.
           pwv_spectrum:        { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: mm, required: false }
           tau_signal_spectrum: { dtype: float64, ndim: 4, dims: [channel, receiver, array, subscan], units: "", required: false }
+          # The signal-band transmission t that calibrate divided each spectrum
+          # by (#66, transmission of each spectrum; L1 2.6): t = exp(-A * tau),
+          # with tau the zenith opacity of tau_signal_spectrum and A the airmass
+          # calibrate used for that fit. Invariant: spectra * t equals the
+          # spectrum before the transmission correction,
+          # (ON - OFF) / (hot - cold) * t_cal, on the same temperature scale.
+          # A consumer fits the baseline there and divides by t again
+          # (kalibrate#254, telluric residuals). NaN where the OFF fit failed.
+          # Optional: an L1 2.5 store lacks it.
+          transmission_signal_spectrum: { dtype: float64, ndim: 4, dims: [channel, receiver, array, subscan], units: "", required: false }
           t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky
           s_h_obs:      { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] observed sky-hot
           t_sky_fit:    { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] ATM-model sky
