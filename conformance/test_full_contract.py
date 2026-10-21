@@ -133,3 +133,19 @@ def test_l0_reference_position_attrs_are_typed(tmp_path):
     generate.emit_l0(tmp_path / "bad.zarr", scan_attr_overrides=bad)
     errors = zss.check(tmp_path / "bad.zarr").errors
     assert any("ref_lon_deg" in e for e in errors), errors
+
+
+# ── transmission of each spectrum (#66, transmission of each spectrum) ─────
+
+
+def test_l1_transmission_spectrum_is_optional_and_typed(tmp_path):
+    name = "transmission_signal_spectrum"
+    generate.emit_l1_single(tmp_path / "ok.zarr")
+    assert zss.check(tmp_path / "ok.zarr").ok
+    generate.emit_l1_single(tmp_path / "absent.zarr", omit={f"scan_000001/{name}"})
+    assert zss.check(tmp_path / "absent.zarr").ok
+    generate.emit_l1_single(
+        tmp_path / "bad.zarr", array_overrides={f"scan_000001/{name}": {"dtype": "int16"}}
+    )
+    errors = zss.check(tmp_path / "bad.zarr").errors
+    assert any(name in e for e in errors), errors
