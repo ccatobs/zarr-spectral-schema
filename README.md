@@ -11,15 +11,17 @@ YODA reads both. All three lock to one hand-authored, language-neutral spec:
 |---|---|
 | Release | `v0.1.0` (tag on `develop`, commit 1041d17) |
 | L0 schema version | 3 (`min_supported` 3) |
-| L1 schema version | 2.6 (`min_supported` 2.0) |
+| L1 schema version | 2.7 (`min_supported` 2.0) |
 | Bindings | Rust crate `bindings/rust/`, Python package `bindings/python/`; same contract, same findings |
 
 L1 2.1 adds `dump_mjd`, L1 2.2 the frame velocity in `v_frame`, L1 2.3
 `pwv_spectrum` and `tau_signal_spectrum`, L1 2.4 the line range
 `line_ranges_kms` (also an optional L0 3 scan attr), L1 2.5 the reference
 position in `ref_lon` and `ref_lat` (from the optional L0 3 scan attrs
-`ref_lon_deg`, `ref_lat_deg`, `coordsys`), and L1 2.6 the transmission
-`transmission_signal_spectrum` that calibrate applied to each spectrum. Each step is additive, so an L1 2.0
+`ref_lon_deg`, `ref_lat_deg`, `coordsys`), L1 2.6 the transmission
+`transmission_signal_spectrum` that calibrate applied to each spectrum, and L1 2.7 the
+reference airmass and the two sky-emission templates (`airmass_reference`,
+`sky_dt_dairmass_spectrum`, `sky_dt_dpwv_spectrum`). Each step is additive, so an L1 2.0
 store still passes. The `versions` section of the spec holds the full history.
 
 ## Consumers

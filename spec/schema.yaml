@@ -162,7 +162,10 @@ versions:
     # No new name: a store below 2.5 holds NaN and the sentinel there.
     # 2.6 (#66, transmission of each spectrum): the optional
     # transmission_signal_spectrum array (additive).
-    value: "2.6"
+    # 2.7 (#68, reference airmass and sky-emission templates): the optional
+    # airmass_reference, sky_dt_dairmass_spectrum and sky_dt_dpwv_spectrum
+    # arrays (additive).
+    value: "2.7"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -623,6 +626,23 @@ levels:
           # (kalibrate#254, telluric residuals). NaN where the OFF fit failed.
           # Optional: an L1 2.5 store lacks it.
           transmission_signal_spectrum: { dtype: float64, ndim: 4, dims: [channel, receiver, array, subscan], units: "", required: false }
+          # Sky-emission templates (#68, reference airmass and sky-emission
+          # templates; L1 2.7). airmass_reference is the airmass of the OFF
+          # reference that calibrate subtracted from each ON subscan. For one
+          # OFF it is the airmass that set t. For a blended or interpolated
+          # reference it is the weighted airmass of the OFFs. The two spectra
+          # are the derivatives of the
+          # DSB sky model T_sky at that airmass and the fitted PWV, on the
+          # temperature scale of spectra * transmission_signal_spectrum.
+          # Invariant: for a dump at airmass A_on,
+          # spectra * t - (A_on - airmass_reference) * sky_dt_dairmass_spectrum
+          # removes the predicted airmass part of the ON-OFF sky difference;
+          # the PWV part has the shape sky_dt_dpwv_spectrum with one amplitude
+          # per subscan. NaN where the OFF fit failed.
+          # Optional: an L1 2.6 store lacks them.
+          airmass_reference:        { dtype: float64, ndim: 1, dims: [subscan], units: "", required: false }
+          sky_dt_dairmass_spectrum: { dtype: float32, ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: false }
+          sky_dt_dpwv_spectrum:     { dtype: float32, ndim: 4, dims: [channel, receiver, array, subscan], units: K/mm, required: false }
           t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky
           s_h_obs:      { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] observed sky-hot
           t_sky_fit:    { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] ATM-model sky

@@ -25,7 +25,7 @@ result.warnings  # list[str], for example a newer minor version
 
 ## Contract
 
-The package validates L0 schema version 3 and L1 schema version 2.6. The floors (`min_supported`) are L0 3 and L1 2.0.
+The package validates L0 schema version 3 and L1 schema version 2.7. The floors (`min_supported`) are L0 3 and L1 2.0.
 
 - The validator accepts the current major version only. A store below `min_supported` gets one version error, without a prefix. Structure findings follow when the store lacks fields of the current version. A consumer stops on the version error.
 - A structure finding starts with `[L0] ` or `[L1] `. A version error and a level-detection error have no prefix.

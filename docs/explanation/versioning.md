@@ -16,7 +16,7 @@ The producer of a store writes its level version as a root attr:
 | Level | Root attr | On-disk type | Current | `min_supported` |
 |---|---|---|---|---|
 | L0 | `l0_schema_version` | JSON integer | 3 | 3 |
-| L1 | `cal_schema_version` | JSON string `major.minor` | 2.6 | 2.0 |
+| L1 | `cal_schema_version` | JSON string `major.minor` | 2.7 | 2.0 |
 
 The producer owns its level version. calibrate bumps the L1 version at its own
 pace. The L0 version has no minor axis, because it is an integer.
@@ -39,7 +39,7 @@ consumer stops on it (ADR 0009, validator error classes).
 
 A minor step is additive: it adds optional fields only. A store written before
 the step lacks those fields and is still correct, so the floor stays at the
-first minor of the major. L1 2.1 to 2.6 added optional arrays and attrs, so L1
+first minor of the major. L1 2.1 to 2.7 added optional arrays and attrs, so L1
 2.0 stores pass. The real stores under `conformance/real_stores/` are L1 2.0.
 
 A major step changes or removes a field. Old stores then break the contract. The

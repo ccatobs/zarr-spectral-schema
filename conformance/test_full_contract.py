@@ -149,3 +149,23 @@ def test_l1_transmission_spectrum_is_optional_and_typed(tmp_path):
     )
     errors = zss.check(tmp_path / "bad.zarr").errors
     assert any(name in e for e in errors), errors
+
+
+# ── reference airmass and sky-emission templates (#68) ──────────────────────
+
+
+def test_l1_sky_templates_are_optional_and_typed(tmp_path):
+    names = ["airmass_reference", "sky_dt_dairmass_spectrum", "sky_dt_dpwv_spectrum"]
+    generate.emit_l1_single(tmp_path / "ok.zarr")
+    assert zss.check(tmp_path / "ok.zarr").ok
+    generate.emit_l1_single(
+        tmp_path / "absent.zarr", omit={f"scan_000001/{n}" for n in names}
+    )
+    assert zss.check(tmp_path / "absent.zarr").ok
+    for n in names:
+        generate.emit_l1_single(
+            tmp_path / f"bad_{n}.zarr",
+            array_overrides={f"scan_000001/{n}": {"dtype": "int16"}},
+        )
+        errors = zss.check(tmp_path / f"bad_{n}.zarr").errors
+        assert any(n in e for e in errors), errors
