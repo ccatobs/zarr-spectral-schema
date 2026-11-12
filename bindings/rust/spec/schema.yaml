@@ -740,7 +740,7 @@ markers:
 # Bit table of the L1 `flags` array (uint16): key = const identifier, value =
 # bit index → `pub const NAME: u16 = 1 << bit` (Python: an int of the same
 # value). A datum is good when flags == 0. Calibrate sets bits 0, 1 and 8, bits
-# 2-7 are set downstream; bits 9-15 are reserved. Bit 5 is ELEVATION_LOW, as calibrate
+# 2-7 and 9 are set downstream; bits 10-15 are reserved. Bit 5 is ELEVATION_LOW, as calibrate
 # (cal-core/src/flags.rs) and YODA (io/flags.py) write it.
 flag_bits:
   BAD_CHANNEL: 0      # calibrate: bad channel (hot <= cold, t_rec out of range)
@@ -759,6 +759,7 @@ flag_bits:
   ML_FLAGGED: 6       # reduction: flagged by a machine-learning model
   MANUAL: 7           # reduction: flagged by hand
   LOW_TRANSMISSION: 8 # calibrate: channel transmission below the min_transmission option (saturated atmospheric line)
+  BAND_EDGE: 9        # reduction: channel outside the good band of its pixel
 
 # Validator-only spec data (generates NO Rust const): for each canonical
 # attribute, the ordered list of source FITS keywords it may be resolved from,
