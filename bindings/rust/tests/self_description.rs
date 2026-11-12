@@ -100,7 +100,7 @@ fn valid_dump_count_disagreeing_on_subscans_is_rejected() {
 fn one_constant_per_flag_bit_with_the_python_values() {
     // The bit table of calibrate cal-core/src/flags.rs and YODA io/flags.py,
     // pinned with the same values in conformance/test_self_description.py.
-    let bits: [(u16, u16); 9] = [
+    let bits: [(u16, u16); 10] = [
         (zss::BAD_CHANNEL, 1 << 0),
         (zss::FILL_VALUE, 1 << 1),
         (zss::SPIKE, 1 << 2),
@@ -110,6 +110,7 @@ fn one_constant_per_flag_bit_with_the_python_values() {
         (zss::ML_FLAGGED, 1 << 6),
         (zss::MANUAL, 1 << 7),
         (zss::LOW_TRANSMISSION, 1 << 8),
+        (zss::BAND_EDGE, 1 << 9),
     ];
     for (got, want) in bits {
         assert_eq!(got, want);

@@ -121,6 +121,7 @@ FLAG_BITS = {
     "ML_FLAGGED": 1 << 6,
     "MANUAL": 1 << 7,
     "LOW_TRANSMISSION": 1 << 8,
+    "BAND_EDGE": 1 << 9,
 }
 
 
