@@ -163,6 +163,7 @@ const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("vlsr_source_frame", "\"NONE\""),
     ("coord_frame", "\"NONE\""),
     ("equinox", "null"),
+    ("eta_fss", "null"),
     ("projection", "\"NONE\""),
     ("offset_convention", "\"NONE\""),
     ("temperature_scale", "\"NONE\""),

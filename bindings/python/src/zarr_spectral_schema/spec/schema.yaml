@@ -168,7 +168,9 @@ versions:
     # airmass_reference, sky_dt_dairmass_spectrum and sky_dt_dpwv_spectrum
     # arrays (additive).
     # 2.8 (#78, per-pixel efficiencies): the optional eta_mb, eta_fss and
-    # image_gain arrays [receiver, array] (additive).
+    # image_gain arrays [receiver, array]; the scan attr eta_fss may hold the null
+    # sentinel; eta_mb, eta_fss and image_gain hold null when the pixels of the
+    # unit differ (additive).
     value: "2.8"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION

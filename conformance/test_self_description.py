@@ -162,6 +162,7 @@ NOT_APPLICABLE = {
     "offset_convention": "NONE",
     "temperature_scale": "NONE",
     "eta_mb": None,
+    "eta_fss": None,
     "sideband_mode": "NONE",
     "image_gain": None,
     "site_longitude_deg": None,

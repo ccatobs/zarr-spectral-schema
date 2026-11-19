@@ -22,7 +22,7 @@ position in `ref_lon` and `ref_lat` (from the optional L0 3 scan attrs
 `transmission_signal_spectrum` that calibrate applied to each spectrum, L1 2.7 the
 reference airmass and the two sky-emission templates (`airmass_reference`,
 `sky_dt_dairmass_spectrum`, `sky_dt_dpwv_spectrum`), and L1 2.8 the per-pixel
-efficiencies `eta_mb`, `eta_fss` and `image_gain` (also optional L0 3 arrays). Each step is additive, so an L1 2.0
+efficiencies `eta_mb`, `eta_fss` and `image_gain` (also optional L0 3 arrays; the scan attr `eta_fss` may hold the null sentinel, and the three attrs hold null when the pixels of the unit differ). Each step is additive, so an L1 2.0
 store still passes. The `versions` section of the spec holds the full history.
 
 ## Consumers
