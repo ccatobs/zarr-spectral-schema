@@ -145,7 +145,8 @@ def test_l1_transmission_spectrum_is_optional_and_typed(tmp_path):
     generate.emit_l1_single(tmp_path / "absent.zarr", omit={f"scan_000001/{name}"})
     assert zss.check(tmp_path / "absent.zarr").ok
     generate.emit_l1_single(
-        tmp_path / "bad.zarr", array_overrides={f"scan_000001/{name}": {"dtype": "int16"}}
+        tmp_path / "bad.zarr",
+        array_overrides={f"scan_000001/{name}": {"dtype": "int16"}},
     )
     errors = zss.check(tmp_path / "bad.zarr").errors
     assert any(name in e for e in errors), errors
@@ -169,3 +170,44 @@ def test_l1_sky_templates_are_optional_and_typed(tmp_path):
         )
         errors = zss.check(tmp_path / f"bad_{n}.zarr").errors
         assert any(n in e for e in errors), errors
+
+
+# ── per-pixel efficiency arrays (#78) ───────────────────────────────────────
+
+_EFF = ["eta_mb", "eta_fss", "image_gain"]
+
+
+@pytest.mark.parametrize("group", ["source", "calibration"])
+def test_l0_efficiency_arrays_are_optional_and_typed(tmp_path, group):
+    base = f"scan_{1 if group == 'source' else 2:06d}/{group}"
+    generate.emit_l0(tmp_path / "ok.zarr")
+    assert zss.check(tmp_path / "ok.zarr").ok
+    generate.emit_l0(tmp_path / "absent.zarr", omit={f"{base}/{n}" for n in _EFF})
+    assert zss.check(tmp_path / "absent.zarr").ok
+    for n in _EFF:
+        for k, bad in (
+            ("dtype", {"dtype": "int16"}),
+            ("dims", {"ndim": 1, "dims": ["subscan"]}),
+        ):
+            out = tmp_path / f"bad_{n}_{k}.zarr"
+            generate.emit_l0(out, array_overrides={f"{base}/{n}": bad})
+            errors = zss.check(out).errors
+            assert any(n in e for e in errors), (n, k, errors)
+
+
+def test_l1_efficiency_arrays_are_optional_and_typed(tmp_path):
+    generate.emit_l1_single(tmp_path / "ok.zarr")
+    assert zss.check(tmp_path / "ok.zarr").ok
+    generate.emit_l1_single(
+        tmp_path / "absent.zarr", omit={f"scan_000001/{n}" for n in _EFF}
+    )
+    assert zss.check(tmp_path / "absent.zarr").ok
+    for n in _EFF:
+        for k, bad in (
+            ("dtype", {"dtype": "int16"}),
+            ("dims", {"ndim": 1, "dims": ["array"]}),
+        ):
+            out = tmp_path / f"bad_{n}_{k}.zarr"
+            generate.emit_l1_single(out, array_overrides={f"scan_000001/{n}": bad})
+            errors = zss.check(out).errors
+            assert any(n in e for e in errors), (n, k, errors)
