@@ -163,6 +163,7 @@ const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("vlsr_source_frame", "\"NONE\""),
     ("coord_frame", "\"NONE\""),
     ("equinox", "null"),
+    ("eta_fss", "null"),
     ("projection", "\"NONE\""),
     ("offset_convention", "\"NONE\""),
     ("temperature_scale", "\"NONE\""),
@@ -208,10 +209,10 @@ fn l0_fixture_holds_the_site_sentinel_and_is_green() {
 
 #[test]
 fn sentinel_on_a_field_that_admits_none_is_rejected() {
-    // eta_fss is the forward efficiency calibrate applied: it always applies.
+    // gain_el_correction is the gain-elevation correction calibrate applied: it always applies.
     assert_any(
-        "l1_eta_fss_null.zarr",
-        &["'eta_fss'", "must be of type \"number\""],
+        "l1_gain_el_null.zarr",
+        &["'gain_el_correction'", "must be of type \"number\""],
     );
 }
 
@@ -335,7 +336,7 @@ fn new_structure_findings_carry_the_level_prefix() {
         "l1_pixel_offset_subscans.zarr",
         "l1_no_frame.zarr",
         "l0_no_site.zarr",
-        "l1_eta_fss_null.zarr",
+        "l1_gain_el_null.zarr",
         "l1_bad_specsys.zarr",
         "l1_multi_band_without_qa.zarr",
         "l1_multi_scan_arrays.zarr",

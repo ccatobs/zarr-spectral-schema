@@ -162,6 +162,7 @@ NOT_APPLICABLE = {
     "offset_convention": "NONE",
     "temperature_scale": "NONE",
     "eta_mb": None,
+    "eta_fss": None,
     "sideband_mode": "NONE",
     "image_gain": None,
     "site_longitude_deg": None,
@@ -196,11 +197,11 @@ def test_l0_fixture_holds_the_site_sentinel_and_is_green(stores):
 
 
 def test_sentinel_on_a_field_that_admits_none_is_rejected(stores):
-    # eta_fss is the forward efficiency calibrate applied: it always applies.
-    errors = zss.validate(stores / "l1_eta_fss_null.zarr")
-    assert any("'eta_fss'" in e and 'must be of type "number"' in e for e in errors), (
-        errors
-    )
+    # gain_el_correction is the gain-elevation correction calibrate applied: it always applies.
+    errors = zss.validate(stores / "l1_gain_el_null.zarr")
+    assert any(
+        "'gain_el_correction'" in e and 'must be of type "number"' in e for e in errors
+    ), errors
 
 
 def test_value_outside_the_declared_set_is_rejected(stores):
@@ -300,7 +301,7 @@ SELF_DESCRIPTION_NEGATIVES = [
     "l1_pixel_offset_subscans.zarr",
     "l1_no_frame.zarr",
     "l0_no_site.zarr",
-    "l1_eta_fss_null.zarr",
+    "l1_gain_el_null.zarr",
     "l1_bad_specsys.zarr",
     "l1_multi_band_without_qa.zarr",
     "l1_multi_scan_arrays.zarr",

@@ -139,6 +139,8 @@ versions:
     # line_ranges_kms.
     # Also in 3, additive (kalibrate#252, reference position): the optional scan
     # attrs ref_lon_deg, ref_lat_deg and coordsys.
+    # Also in 3, additive (#78, per-pixel efficiencies): the optional arrays
+    # eta_mb, eta_fss and image_gain [receiver, array, subscan].
     value: "3"
     min_supported: "3"
   cal_schema_version:           # on-disk attr name; Rust const is L1_SCHEMA_VERSION
@@ -165,7 +167,11 @@ versions:
     # 2.7 (#68, reference airmass and sky-emission templates): the optional
     # airmass_reference, sky_dt_dairmass_spectrum and sky_dt_dpwv_spectrum
     # arrays (additive).
-    value: "2.7"
+    # 2.8 (#78, per-pixel efficiencies): the optional eta_mb, eta_fss and
+    # image_gain arrays [receiver, array]; the scan attr eta_fss may hold the null
+    # sentinel; eta_mb, eta_fss and image_gain hold null when the pixels of the
+    # unit differ (additive).
+    value: "2.8"
     min_supported: "2.0"
     const: L1_SCHEMA_VERSION
 
@@ -383,6 +389,15 @@ levels:
           bck_len:          { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }   # BCKLEN: length of one backend cycle
           spec_time:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }   # SPECTIME: dump length without chopping
           otf_srcyc:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }   # OTFSRCYC: chop cycles per dump; 0 = not chopped OTF
+          # Per-pixel efficiencies (#78, per-pixel efficiencies) [R,A,S], typed so
+          # no consumer reads raw_fits_headers: the main-beam efficiency (FITS
+          # BEFF), the forward efficiency (FOEFF) and the image gain (GAINIMAG)
+          # of each pixel and subscan. Dimensionless. Optional: added within L0 3.
+          # Absent => a store written before #78 (per-pixel efficiencies); calibrate then applies one
+          # value per run.
+          eta_mb:           { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
+          eta_fss:          { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
+          image_gain:       { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
           # Source-only geometry: OTF scan track [D,S] and per-pixel offsets [R,A,S].
           # Always written in the `is_source` branch (writer.rs:536-593) → required.
           otf_lon:          { dtype: float64, ndim: 2, dims: [dump, subscan], units: deg, required: true }
@@ -434,6 +449,10 @@ levels:
           bck_len:          { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }
           spec_time:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }
           otf_srcyc:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }
+          # Per-pixel efficiencies (#78, per-pixel efficiencies), as in the source group.
+          eta_mb:           { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
+          eta_fss:          { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
+          image_gain:       { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
           # Load-temperature tables, calibration variant. No otf_*/pixel_offset_*
           # here (the writer's geometry block is source-only). Conditional → false.
           load_temp_sig_5d: { dtype: float64, ndim: 5, dims: [channel, load_dump, receiver, array, subscan], units: K, required: false }
@@ -561,7 +580,7 @@ levels:
       offset_convention: { type: string,  required: true, sentinel: true, enum: [equatorial_cosdec, equatorial_coord, horizontal] }   # how otf_* and pixel_offset_* offsets are formed
       # Intensity.
       temperature_scale: { type: string,  required: true, sentinel: true, enum: ["TA*", TMB, "TR*", TB] }   # intensity scale of spectra
-      eta_fss:           { type: number,  required: true }   # forward efficiency calibrate applied (eta_f; legacy name)
+      eta_fss:           { type: number,  required: true, sentinel: true }   # forward efficiency calibrate applied (eta_f; legacy name)
       eta_mb:            { type: number,  required: true, sentinel: true }   # main-beam efficiency
       gain_el_correction: { type: number, required: true }   # gain-elevation correction calibrate applied
       sideband_mode:     { type: string,  required: true, sentinel: true, enum: [SSB, DSB, USB, LSB] }   # receiver sideband mode
@@ -643,6 +662,16 @@ levels:
           airmass_reference:        { dtype: float64, ndim: 1, dims: [subscan], units: "", required: false }
           sky_dt_dairmass_spectrum: { dtype: float32, ndim: 4, dims: [channel, receiver, array, subscan], units: K, required: false }
           sky_dt_dpwv_spectrum:     { dtype: float32, ndim: 4, dims: [channel, receiver, array, subscan], units: K/mm, required: false }
+          # Per-pixel efficiencies (#78, per-pixel efficiencies; L1 2.8): the
+          # value calibrate applied to each pixel [R,A]: main-beam efficiency,
+          # forward efficiency and image gain, dimensionless. The scalar scan
+          # attrs of the same names stay required and follow one rule: each
+          # holds the common value when all pixels of the unit agree, else the
+          # null sentinel (JSON null; NaN is an array fill value only).
+          # Optional: an L1 2.7 store lacks them.
+          eta_mb:           { dtype: float64, ndim: 2, dims: [receiver, array], units: "", required: false }
+          eta_fss:          { dtype: float64, ndim: 2, dims: [receiver, array], units: "", required: false }
+          image_gain:       { dtype: float64, ndim: 2, dims: [receiver, array], units: "", required: false }
           t_sky:        { dtype: float64, ndim: 3, dims: [channel, receiver, array], units: K, required: true }   # C,R,A; ≠ L0 tsky
           s_h_obs:      { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] observed sky-hot
           t_sky_fit:    { dtype: float64, ndim: 1, dims: [channel], units: K, required: true }   # [C] ATM-model sky
