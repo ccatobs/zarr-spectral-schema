@@ -730,7 +730,9 @@ def emit_self_description_fixtures(out: Path) -> None:
     # field that always applies admits none.
     emit_l1_single(out / "l1_not_applicable.zarr", not_applicable=True)
     emit_l0(out / "l0_not_applicable.zarr", not_applicable=True)
-    emit_l1_single(out / "l1_eta_fss_null.zarr", scan_attr_overrides={"eta_fss": None})
+    emit_l1_single(
+        out / "l1_gain_el_null.zarr", scan_attr_overrides={"gain_el_correction": None}
+    )
     # A vocabulary field holds a value of its declared set.
     emit_l1_single(out / "l1_bad_specsys.zarr", scan_attr_overrides={"specsys": "LSR"})
     # 4. Multi-frontend L1: identity, quality record and provenance sit on each

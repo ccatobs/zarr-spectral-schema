@@ -448,7 +448,6 @@ levels:
           spec_time:        { dtype: float64, ndim: 1, dims: [subscan], units: s, required: false }
           otf_srcyc:        { dtype: int32,   ndim: 1, dims: [subscan], required: false }
           # Per-pixel efficiencies (#78, per-pixel efficiencies), as in the source group.
-          # value per run.
           eta_mb:           { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
           eta_fss:          { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
           image_gain:       { dtype: float64, ndim: 3, dims: [receiver, array, subscan], units: "", required: false }
@@ -579,7 +578,7 @@ levels:
       offset_convention: { type: string,  required: true, sentinel: true, enum: [equatorial_cosdec, equatorial_coord, horizontal] }   # how otf_* and pixel_offset_* offsets are formed
       # Intensity.
       temperature_scale: { type: string,  required: true, sentinel: true, enum: ["TA*", TMB, "TR*", TB] }   # intensity scale of spectra
-      eta_fss:           { type: number,  required: true }   # forward efficiency calibrate applied (eta_f; legacy name); with the eta_fss array: the common value of the pixels
+      eta_fss:           { type: number,  required: true, sentinel: true }   # forward efficiency calibrate applied (eta_f; legacy name)
       eta_mb:            { type: number,  required: true, sentinel: true }   # main-beam efficiency
       gain_el_correction: { type: number, required: true }   # gain-elevation correction calibrate applied
       sideband_mode:     { type: string,  required: true, sentinel: true, enum: [SSB, DSB, USB, LSB] }   # receiver sideband mode
@@ -664,10 +663,9 @@ levels:
           # Per-pixel efficiencies (#78, per-pixel efficiencies; L1 2.8): the
           # value calibrate applied to each pixel [R,A]: main-beam efficiency,
           # forward efficiency and image gain, dimensionless. The scalar scan
-          # attrs of the same names stay required: each holds the common value
-          # when all pixels of the unit agree. eta_mb and image_gain hold the
-          # null sentinel (NaN) when the pixels differ; eta_fss admits no
-          # sentinel (it always applies), so a producer writes the mean there.
+          # attrs of the same names stay required and follow one rule: each
+          # holds the common value when all pixels of the unit agree, else the
+          # null sentinel (JSON null; NaN is an array fill value only).
           # Optional: an L1 2.7 store lacks them.
           eta_mb:           { dtype: float64, ndim: 2, dims: [receiver, array], units: "", required: false }
           eta_fss:          { dtype: float64, ndim: 2, dims: [receiver, array], units: "", required: false }

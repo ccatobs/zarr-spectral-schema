@@ -41,6 +41,9 @@ def test_constants_derived_from_spec():
     # Expanded vocabulary (#3): groups, L1 version, marker, list consts.
     assert zss.SOURCE_GROUP == "source"
     assert zss.CALIBRATION_GROUP == "calibration"
+    assert zss.ETA_MB == "eta_mb"
+    assert zss.ETA_FSS == "eta_fss"
+    assert zss.IMAGE_GAIN == "image_gain"
     assert zss.L1_SCHEMA_VERSION == "2.8"  # const name ≠ UPPER(attr cal_schema_version)
     assert zss.TSKY_L0 == "tsky"  # const override
     assert zss.L1_COMPLETE_ATTR == "l1_complete"  # marker

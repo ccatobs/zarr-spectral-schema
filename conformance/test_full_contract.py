@@ -188,6 +188,7 @@ def test_l0_efficiency_arrays_are_optional_and_typed(tmp_path, group):
         for k, bad in (
             ("dtype", {"dtype": "int16"}),
             ("dims", {"ndim": 1, "dims": ["subscan"]}),
+            ("order", {"dims": ["array", "receiver", "subscan"]}),
         ):
             out = tmp_path / f"bad_{n}_{k}.zarr"
             generate.emit_l0(out, array_overrides={f"{base}/{n}": bad})
@@ -206,6 +207,7 @@ def test_l1_efficiency_arrays_are_optional_and_typed(tmp_path):
         for k, bad in (
             ("dtype", {"dtype": "int16"}),
             ("dims", {"ndim": 1, "dims": ["array"]}),
+            ("order", {"dims": ["array", "receiver"]}),
         ):
             out = tmp_path / f"bad_{n}_{k}.zarr"
             generate.emit_l1_single(out, array_overrides={f"scan_000001/{n}": bad})
